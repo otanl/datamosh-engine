@@ -20,3 +20,9 @@ AGENTS.md
 # Keep the small committed donor samples used by the demos/elementary-stream examples
 !samples/*.m2v
 !samples/*.h264
+
+# Keep the committed TouchDesigner demo clip
+!touchdesigner/demo/media/*.mp4
+
+# Built TouchDesigner plugin DLLs staged for the demo (regenerate with build-td-plugins.cmd)
+touchdesigner/demo/Plugins/
