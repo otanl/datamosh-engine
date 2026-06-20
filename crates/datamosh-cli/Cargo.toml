@@ -1,0 +1,13 @@
+[package]
+name = "datamosh-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "datamosh-cli"
+path = "src/main.rs"
+
+[dependencies]
+datamosh = { path = "../.." }
+datamosh-streamfilter = { path = "../datamosh-streamfilter" }

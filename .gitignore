@@ -1,0 +1,22 @@
+/target/
+
+# AI-assistant docs and local config (kept out of the public repo)
+CLAUDE.md
+AGENTS.md
+.claude/
+
+*.h264
+*.h265
+*.hevc
+*.m4v
+*.m2v
+*.mpv
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.log
+
+# Keep the small committed donor samples used by the demos/elementary-stream examples
+!samples/*.m2v
+!samples/*.h264

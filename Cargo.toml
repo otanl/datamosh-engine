@@ -1,0 +1,14 @@
+[workspace]
+members = ["crates/datamosh-streamfilter", "crates/datamosh-cli"]
+
+[package]
+name = "datamosh"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+rayon = "1.11"
