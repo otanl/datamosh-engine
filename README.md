@@ -2,27 +2,29 @@
 
 Realtime datamoshing core built around a Rust stream filter, FFmpeg-compatible elementary streams, and an experimental custom motion codec.
 
-![Realtime datamosh: the custom motion codec smearing a Mandelbrot zoom](assets/datamosh.gif)
+![Three datamosh codec backends glitching the same Mandelbrot zoom — motion (MSH0), scanline (SCN0), DCT (DCT0)](assets/datamosh.gif)
 
-*A Mandelbrot zoom run through the custom **MSH0 motion codec** (`raw-mosh --preset classic`): block motion vectors are kept and residuals dropped, so every frame is rebuilt from stale motion and melts. Made with a pure `ffmpeg → datamosh raw-mosh → ffmpeg` pipe — no plugin host involved.*
+*The same Mandelbrot zoom pushed through all three custom codec backends: **MSH0 motion** (`classic` — stale motion vectors with residuals dropped, so it melts), **SCN0 scanline/signal** (`predictor-ghost` — analog-style line tearing and ghosting), and **DCT0 transform** (`bleed` — JPEG-style block DC smear). Three distinct glitch families on identical input, made with a pure FFmpeg → engine → FFmpeg pipe — no plugin host. The two CUDA TOPs are GPU-native re-implementations of the motion and DCT paths, kept at parity by hand — same look, on the GPU.*
 
 <details>
-<summary>Regenerate this GIF (FFmpeg + the <code>raw-mosh</code> harness)</summary>
+<summary>Regenerate this GIF</summary>
 
-```powershell
-cargo build --release
-# Mandelbrot zoom -> raw RGB24 -> motion codec -> raw RGB24 -> MP4
-ffmpeg -f lavfi -i "mandelbrot=size=854x480:rate=30" -t 8 -vf format=rgb24 -f rawvideo -pix_fmt rgb24 - `
-  | target/release/datamosh-cli.exe raw-mosh --width 854 --height 480 --preset classic `
-  | ffmpeg -f rawvideo -pixel_format rgb24 -video_size 854x480 -framerate 30 -i - `
-      -frames:v 240 -pix_fmt yuv420p target/demo.mp4
-# MP4 -> optimized looping GIF
-ffmpeg -t 6 -i target/demo.mp4 -vf "fps=10,scale=400:-1:flags=lanczos,palettegen=stats_mode=diff" target/pal.png
-ffmpeg -t 6 -i target/demo.mp4 -i target/pal.png `
-  -lavfi "fps=10,scale=400:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none" assets/datamosh.gif
+The full pipeline (render each backend, label, tile 1×3, palette-optimize) lives in [`scripts/make-demo-gif.sh`](scripts/make-demo-gif.sh):
+
+```bash
+bash scripts/make-demo-gif.sh        # writes assets/datamosh.gif
 ```
 
-Swap `--preset classic` for `melt`, `drift`, `bank`, `vector`, `pixel`, … (see `raw-mosh --help`) for different looks.
+Its core is one FFmpeg → engine → FFmpeg pipe per backend (`raw_engine` arg 3 selects the backend: 1 = motion, 2 = scanline, 3 = dct):
+
+```bash
+cargo build --release --example raw_engine
+ffmpeg -f lavfi -i "mandelbrot=size=854x480:rate=30" -t 8 -vf format=rgb24 -f rawvideo -pix_fmt rgb24 - \
+  | target/release/examples/raw_engine 854 480 1 classic \
+  | ffmpeg -f rawvideo -pixel_format rgb24 -video_size 854x480 -framerate 30 -i - -pix_fmt yuv420p out.mp4
+```
+
+Swap the backend id and preset (`datamosh raw-mosh --help` lists the motion presets; `touchdesigner/README.md` lists the scanline/DCT patterns).
 </details>
 
 The current tool reads compressed elementary streams from stdin and writes modified compressed streams to stdout. It supports H.264 Annex B, H.265/HEVC Annex B, MPEG-4 Part 2/ASP `.m4v` including Xvid/DivX-style streams, MPEG-1 Video, and MPEG-2 Video elementary streams. It drops selected keyframes, damages predicted frame payloads, truncates payloads, scrambles bytes, rotates payload regions, splices/grows with previous or donor payload data, injects previous units, replaces units, XORs with previous or donor units, rewrites MPEG frame type headers, and repeats predicted units. It also includes an experimental raw RGB24 `MoshCodec` that encodes frames into block motion vectors plus residuals, then decodes them through controllable glitch parameters. The custom MSH0 bitstream path can also damage serialized motion/residual data before decode, including residual payload byte-slip to simulate decoder state desync, transform-coefficient corruption for a frequency-domain glitch path, and residual codebook/dictionary misreads. Two further custom codec backends sit alongside it: an SCN0 predictive scanline/signal codec, and a DCT0 intra transform codec (8x8 DCT, 4:2:0 chroma, and a real canonical-Huffman entropy bitstream — JPEG/DV-style), each with its own coefficient-domain and serialized-stream glitch families.
