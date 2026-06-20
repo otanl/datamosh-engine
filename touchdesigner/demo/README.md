@@ -21,13 +21,31 @@ A quick-start project that runs the datamosh codec TOPs on a video input in real
 
 ## What the project shows
 
-- A `Movie File In TOP` plays `media/sample.mp4`. Swap in a `Video Device In TOP` for a live
-  webcam (list devices with `ffmpeg -list_devices true -f dshow -i dummy`).
-- A datamosh Custom TOP applies the glitch. Its `Pattern` menu and the macro sliders
-  (`Intensity`, `Structure`, `Persist`/`Residual`, `DC`/`Temporal`, `Quant`/`Bitstream`) are
-  the main controls; keep `Use Overrides` off while auditioning patterns.
-- Optional audio-reactive chain: `Audio Device In CHOP → Audio Spectrum/Analyze → Lag/Math →`
-  a CHOP referenced by the TOP's `Audio` page, so sound drives the macros and reset.
+The network is a **side-by-side comparison** of the three CPU codec backends running live on
+one moving source:
+
+```
+source (Movie File In, media/sample.mp4)
+  → xform (slow pan + rotate — injects motion so the motion codec has vectors to chew on)
+      → motion1   (DatamoshTOP        · MSH0 · Pattern "melt")
+      → scanline1 (ScanlineSignalTOP  · SCN0 · Pattern "predictor-ghost")
+      → dct1      (DatamoshDctTOP      · DCT0 · Pattern "bleed")
+  → grid (Layout TOP, 2×2, with text labels) → out1
+```
+
+- `source` plays `media/sample.mp4`. Swap in a `Video Device In TOP` for a live webcam (list
+  devices with `ffmpeg -list_devices true -f dshow -i dummy`).
+- `xform` adds a gentle continuous pan/rotate. Datamoshing lives on **motion** — a frozen test
+  pattern barely moshes, so the transform gives the motion codec real motion vectors to smear.
+- Each datamosh Custom TOP exposes a `Pattern` menu plus the shared macro sliders (`Intensity`,
+  `Motion`, `Residual`, `Temporal`, `Bitstream`); keep `Use Overrides` off while auditioning
+  patterns. `out1` shows the labelled 2×2 grid (Original / Motion / Scanline / DCT).
+- **To use a single codec** instead of the comparison, just wire that codec (e.g. `motion1`)
+  straight into `out1`, or drop in `Datamosh.tox`.
+- **Audio-reactive** is wired into the parameters but left off: the motion TOP's `Audio` page
+  already maps a control channel to `Intensity`/`Temporal` and a reset on transients
+  (`Audio Gain`, `Reset Threshold`). Attach a CHOP (e.g. `Audio Device In → Analyze RMS → Lag`)
+  to the `Control CHOP` field and switch `Audio Enable` on to make sound drive the glitch.
 
 The three CPU TOPs (motion / scanline / DCT) and the two CUDA TOPs each expose their own
 `Pattern` menu — see `../README.md` for the per-operator pattern/parameter reference.

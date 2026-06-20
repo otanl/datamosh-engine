@@ -1,4 +1,4 @@
-# datamosh
+# datamosh-engine
 
 Realtime datamoshing core built around a Rust stream filter, FFmpeg-compatible elementary streams, and an experimental custom motion codec.
 

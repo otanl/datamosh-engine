@@ -26,3 +26,6 @@ AGENTS.md
 
 # Built TouchDesigner plugin DLLs staged for the demo (regenerate with build-td-plugins.cmd)
 touchdesigner/demo/Plugins/
+
+# TouchDesigner auto-saved .toe backups
+touchdesigner/demo/Backup/
