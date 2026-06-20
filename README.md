@@ -205,3 +205,5 @@ Key files: `src/mosh_codec.rs` (MSH0), `src/scanline_codec.rs` (SCN0), `src/dct_
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+FFmpeg and FFplay are separate, user-installed dependencies invoked as external processes — they are neither linked nor bundled, and remain under their own licenses.
