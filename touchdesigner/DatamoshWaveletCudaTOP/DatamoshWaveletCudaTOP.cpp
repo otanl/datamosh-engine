@@ -1,6 +1,6 @@
-#include "DatamoshDctCudaTOP.h"
+#include "DatamoshWaveletCudaTOP.h"
 
-#include "DatamoshDctCudaPresets.h"
+#include "DatamoshWaveletCudaPresets.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,14 +13,20 @@ constexpr int kImplementationVersion = 2;
 constexpr int kOperatorVersion = 2;
 constexpr int kPatternSchemaVersion = 1;
 
-// Pattern table + preset resolution live in DatamoshDctCudaPresets.h so the parity check
-// (tools/dct_parity_check.cu) uses the identical values.
-using namespace dctcuda;
+using namespace waveletcuda;
 
 const char* kPatternLabels[] = {
-    "Clean", "Quantize Blocks", "DC Predictor Smear", "Block DC Bleed", "Coefficient Low-Pass",
-    "Coefficient Sign Ring", "Coefficient Scramble", "Block Slip", "Block Echo", "Temporal Flow",
-    "False Colour", "Transform Collapse",
+    "Clean",
+    "Subband Packet Slip",
+    "Orientation Cross",
+    "Scale Fold",
+    "Bitplane Rain",
+    "Lowpass Ghost",
+    "Temporal Pyramid Weave",
+    "Packet Loss Concealment",
+    "Lifting State Drift",
+    "Chroma Pyramid Route",
+    "Hierarchy Collapse",
 };
 
 struct ParameterBinding
@@ -30,23 +36,26 @@ struct ParameterBinding
 };
 
 constexpr ParameterBinding kParameterBindings[] = {
-    {"Quantscale", "quant_scale"},
-    {"Dcdrift", "dc_drift"},
-    {"Dcdriftperiod", "dc_drift_every"},
-    {"Dcoffset", "dc_block_offset"},
-    {"Dcoffsetperiod", "dc_block_offset_every"},
-    {"Aczero", "ac_zero_above"},
-    {"Signflip", "coeff_sign_flip_every"},
-    {"Coeffshift", "coeff_shift"},
-    {"Coeffshiftperiod", "coeff_shift_every"},
-    {"Blockshiftx", "block_shift_x"},
-    {"Blockshifty", "block_shift_y"},
-    {"Blockshiftperiod", "block_shift_every"},
-    {"Blockrepeat", "block_repeat_every"},
-    {"Zigzagreverse", "zigzag_reverse_every"},
-    {"Blocktranspose", "block_transpose_every"},
-    {"Chromaswap", "chroma_swap_every"},
-    {"Persistence", "persistence"},
+    {"Packetshift", "packet_shift"},
+    {"Packetshiftperiod", "packet_shift_every"},
+    {"Orientation", "orientation_rotate"},
+    {"Orientationperiod", "orientation_rotate_every"},
+    {"Levelfold", "level_fold"},
+    {"Levelfoldperiod", "level_fold_every"},
+    {"Channelroute", "channel_route"},
+    {"Channelperiod", "channel_route_every"},
+    {"Packetloss", "packet_loss_every"},
+    {"Packetconceal", "packet_loss_conceal"},
+    {"Bitclear", "bitplane_clear"},
+    {"Bitclearperiod", "bitplane_clear_every"},
+    {"Bitxor", "bitplane_xor"},
+    {"Bitxorperiod", "bitplane_xor_every"},
+    {"Signflip", "sign_flip_every"},
+    {"Historylag", "history_lag"},
+    {"Historyperiod", "history_band_every"},
+    {"Lowpasslag", "lowpass_history_lag"},
+    {"Liftingbias", "lifting_bias"},
+    {"Liftingperiod", "lifting_bias_every"},
 };
 
 void appendFloat(
@@ -165,6 +174,7 @@ float latestChopValue(
         }
         return 0.0f;
     }
+
     if (channel.empty() || !chop->nameData)
         return 0.0f;
     for (int32_t i = 0; i < chop->numChannels; ++i)
@@ -215,9 +225,22 @@ void setupSurface(cudaSurfaceObject_t* surface, cudaArray_t array)
     }
 }
 
+int maxLevels(int width, int height)
+{
+    int levels = 0;
+    while (width > 1 && height > 1)
+    {
+        ++levels;
+        width = (width + 1) / 2;
+        height = (height + 1) / 2;
+    }
+    return std::max(1, levels);
+}
+
 } // namespace
 
-DatamoshDctCudaTOP::DatamoshDctCudaTOP(const OP_NodeInfo* info, TOP_Context* context)
+DatamoshWaveletCudaTOP::DatamoshWaveletCudaTOP(
+    const OP_NodeInfo* info, TOP_Context* context)
     : myNodeInfo(info), myContext(context)
 {
     cudaError_t status = cudaStreamCreate(&myStream);
@@ -225,7 +248,7 @@ DatamoshDctCudaTOP::DatamoshDctCudaTOP(const OP_NodeInfo* info, TOP_Context* con
         setCudaError("cudaStreamCreate", status);
 }
 
-DatamoshDctCudaTOP::~DatamoshDctCudaTOP()
+DatamoshWaveletCudaTOP::~DatamoshWaveletCudaTOP()
 {
     releaseState();
     if (myInputSurface)
@@ -236,13 +259,15 @@ DatamoshDctCudaTOP::~DatamoshDctCudaTOP()
         cudaStreamDestroy(myStream);
 }
 
-void DatamoshDctCudaTOP::getGeneralInfo(TOP_GeneralInfo* info, const OP_Inputs*, void*)
+void DatamoshWaveletCudaTOP::getGeneralInfo(
+    TOP_GeneralInfo* info, const OP_Inputs*, void*)
 {
     info->cookEveryFrame = true;
     info->cookEveryFrameIfAsked = true;
 }
 
-void DatamoshDctCudaTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
+void DatamoshWaveletCudaTOP::execute(
+    TOP_Output* output, const OP_Inputs* inputs, void*)
 {
     ++myExecuteCount;
     myCookStage = 1;
@@ -256,18 +281,20 @@ void DatamoshDctCudaTOP::execute(TOP_Output* output, const OP_Inputs* inputs, vo
         return;
     }
     myInputCooks = input->totalCooks;
-    myCookStage = 2;
     const OP_PixelFormat inputFormat = input->textureDesc.pixelFormat;
     myInputFormat = static_cast<int32_t>(inputFormat);
     const bool supportedFormat =
-        inputFormat == OP_PixelFormat::BGRA8Fixed || inputFormat == OP_PixelFormat::RGBA8Fixed ||
-        inputFormat == OP_PixelFormat::RGBA16Fixed || inputFormat == OP_PixelFormat::RGBA16Float ||
+        inputFormat == OP_PixelFormat::BGRA8Fixed ||
+        inputFormat == OP_PixelFormat::RGBA8Fixed ||
+        inputFormat == OP_PixelFormat::RGBA16Fixed ||
+        inputFormat == OP_PixelFormat::RGBA16Float ||
         inputFormat == OP_PixelFormat::RGBA32Float;
     if (input->textureDesc.texDim != OP_TexDim::e2D || !supportedFormat)
     {
         myError = "GPU codec requires a 2D BGRA/RGBA 8/16/32-bit input";
         return;
     }
+    myCookStage = 2;
 
     myPatternIndex = std::clamp(inputs->getParInt("Pattern"), 0, patternCount() - 1);
     const char* pattern = inputs->getParString("Pattern");
@@ -280,10 +307,19 @@ void DatamoshDctCudaTOP::execute(TOP_Output* output, const OP_Inputs* inputs, vo
         myLastPatternIndex = myPatternIndex;
     }
 
-    DatamoshDctCudaParams params = presetParams(myPatternIndex);
+    const int width = static_cast<int>(input->textureDesc.width);
+    const int height = static_cast<int>(input->textureDesc.height);
+    DatamoshWaveletCudaParams params = presetParams(myPatternIndex);
     params.pattern = myPatternIndex;
+
     params.quality = std::clamp(
         static_cast<int>(std::lround(inputs->getParDouble("Quality"))), 1, 100);
+    params.levels = std::clamp(
+        static_cast<int>(std::lround(inputs->getParDouble("Levels"))),
+        1,
+        maxLevels(width, height));
+    params.historyLength = std::clamp(
+        static_cast<int>(std::lround(inputs->getParDouble("Historylen"))), 1, 128);
 
     myUseParams = inputs->getParInt("Useparams") != 0;
     if (myLastUseParams && !myUseParams)
@@ -296,7 +332,8 @@ void DatamoshDctCudaTOP::execute(TOP_Output* output, const OP_Inputs* inputs, vo
             setParameter(
                 params,
                 binding.id,
-                static_cast<float>(inputs->getParDouble(binding.parName)));
+                static_cast<float>(inputs->getParDouble(binding.parName)),
+                maxLevels(width, height));
         }
     }
 
@@ -309,35 +346,33 @@ void DatamoshDctCudaTOP::execute(TOP_Output* output, const OP_Inputs* inputs, vo
         !setParameter(
             params,
             myParameterId.c_str(),
-            static_cast<float>(inputs->getParDouble("Paramvalue"))))
+            static_cast<float>(inputs->getParDouble("Paramvalue")),
+            maxLevels(width, height)))
     {
-        myWarning = isEntropyParameter(myParameterId.c_str())
-                        ? "DTE0 entropy parameters are CPU-only"
-                        : "Unknown DCT0 parameter: " + myParameterId;
+        myWarning = "Unknown WVT0 parameter: " + myParameterId;
     }
 
     myIntensity = static_cast<float>(inputs->getParDouble("Intensity"));
     myStructure = static_cast<float>(inputs->getParDouble("Motion"));
-    myPersist = static_cast<float>(inputs->getParDouble("Residual"));
-    myDc = static_cast<float>(inputs->getParDouble("Temporal"));
-    myQuant = static_cast<float>(inputs->getParDouble("Bitstream"));
+    myCoefficient = static_cast<float>(inputs->getParDouble("Residual"));
+    myHistory = static_cast<float>(inputs->getParDouble("Temporal"));
+    myRouting = static_cast<float>(inputs->getParDouble("Bitstream"));
     applyAudioControlInputs(inputs);
     applyControls(
         params,
         myIntensity,
         myStructure,
-        myPersist,
-        myDc,
-        myQuant);
+        myCoefficient,
+        myHistory,
+        myRouting);
     params.inputFormat = static_cast<int>(inputFormat);
     if (params.quality != myQuality)
     {
         myQuality = params.quality;
         myResetPending = true;
     }
-
-    const int width = static_cast<int>(input->textureDesc.width);
-    const int height = static_cast<int>(input->textureDesc.height);
+    const int levels = params.levels;
+    const int historyLength = params.historyLength;
 
     OP_CUDAAcquireInfo acquireInfo;
     acquireInfo.stream = myStream;
@@ -363,42 +398,44 @@ void DatamoshDctCudaTOP::execute(TOP_Output* output, const OP_Inputs* inputs, vo
     }
     myCookStage = 5;
 
-    if (!ensureState(width, height))
+    if (!ensureState(width, height, levels, historyLength))
     {
         myContext->endCUDAOperations(nullptr);
         return;
     }
-    myCookStage = 6;
-
     setupSurface(&myInputSurface, inputInfo->cudaArray);
     setupSurface(&myOutputSurface, outputInfo->cudaArray);
     if (myResetPending)
     {
-        datamoshDctCudaReset(myState);
+        datamoshWaveletCudaReset(myState);
         myResetPending = false;
     }
+    myCookStage = 6;
 
     cudaError_t status =
-        datamoshDctCudaProcess(myState, myInputSurface, myOutputSurface, params, myStream);
+        datamoshWaveletCudaProcess(myState, myInputSurface, myOutputSurface, params, myStream);
     if (status == cudaSuccess)
     {
         ++myProcessedFrames;
         myCookStage = 7;
     }
     else
-        setCudaError("datamoshDctCudaProcess", status);
+    {
+        setCudaError("datamoshWaveletCudaProcess", status);
+    }
 
     myContext->endCUDAOperations(nullptr);
     if (status == cudaSuccess)
         myCookStage = 8;
 }
 
-int32_t DatamoshDctCudaTOP::getNumInfoCHOPChans(void*)
+int32_t DatamoshWaveletCudaTOP::getNumInfoCHOPChans(void*)
 {
-    return 19;
+    return 21;
 }
 
-void DatamoshDctCudaTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
+void DatamoshWaveletCudaTOP::getInfoCHOPChan(
+    int32_t index, OP_InfoCHOPChan* chan, void*)
 {
     switch (index)
     {
@@ -419,58 +456,66 @@ void DatamoshDctCudaTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, v
             chan->value = static_cast<float>(myHeight);
             break;
         case 4:
+            chan->name->setString("levels");
+            chan->value = static_cast<float>(myLevels);
+            break;
+        case 5:
+            chan->name->setString("history_length");
+            chan->value = static_cast<float>(myHistoryLength);
+            break;
+        case 6:
             chan->name->setString("input_cooks");
             chan->value = static_cast<float>(myInputCooks);
             break;
-        case 5:
+        case 7:
             chan->name->setString("cook_stage");
             chan->value = static_cast<float>(myCookStage);
             break;
-        case 6:
+        case 8:
             chan->name->setString("input_format");
             chan->value = static_cast<float>(myInputFormat);
             break;
-        case 7:
+        case 9:
             chan->name->setString("pattern_index");
             chan->value = static_cast<float>(myPatternIndex);
             break;
-        case 8:
+        case 10:
             chan->name->setString("implementation_version");
             chan->value = static_cast<float>(kImplementationVersion);
             break;
-        case 9:
+        case 11:
             chan->name->setString("pattern_count");
             chan->value = static_cast<float>(patternCount());
             break;
-        case 10:
+        case 12:
             chan->name->setString("audio_active");
             chan->value = myAudioActive ? 1.0f : 0.0f;
             break;
-        case 11:
+        case 13:
             chan->name->setString("audio_reset");
             chan->value = myAudioResetValue;
             break;
-        case 12:
+        case 14:
             chan->name->setString("intensity");
             chan->value = myIntensity;
             break;
-        case 13:
+        case 15:
             chan->name->setString("structure");
             chan->value = myStructure;
             break;
-        case 14:
-            chan->name->setString("persist");
-            chan->value = myPersist;
-            break;
-        case 15:
-            chan->name->setString("dc");
-            chan->value = myDc;
-            break;
         case 16:
-            chan->name->setString("quant");
-            chan->value = myQuant;
+            chan->name->setString("coefficient");
+            chan->value = myCoefficient;
             break;
         case 17:
+            chan->name->setString("history");
+            chan->value = myHistory;
+            break;
+        case 18:
+            chan->name->setString("routing");
+            chan->value = myRouting;
+            break;
+        case 19:
             chan->name->setString("operator_version");
             chan->value = static_cast<float>(kOperatorVersion);
             break;
@@ -481,15 +526,16 @@ void DatamoshDctCudaTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, v
     }
 }
 
-bool DatamoshDctCudaTOP::getInfoDATSize(OP_InfoDATSize* info, void*)
+bool DatamoshWaveletCudaTOP::getInfoDATSize(OP_InfoDATSize* info, void*)
 {
-    info->rows = 12;
+    info->rows = 14;
     info->cols = 2;
     info->byColumn = false;
     return true;
 }
 
-void DatamoshDctCudaTOP::getInfoDATEntries(int32_t index, int32_t, OP_InfoDATEntries* entries, void*)
+void DatamoshWaveletCudaTOP::getInfoDATEntries(
+    int32_t index, int32_t, OP_InfoDATEntries* entries, void*)
 {
     const char* key = "";
     std::string value;
@@ -497,7 +543,7 @@ void DatamoshDctCudaTOP::getInfoDATEntries(int32_t index, int32_t, OP_InfoDATEnt
     {
         case 0:
             key = "backend";
-            value = "cuda_dct_v1";
+            value = "cuda_wavelet_v1";
             break;
         case 1:
             key = "pattern";
@@ -508,10 +554,18 @@ void DatamoshDctCudaTOP::getInfoDATEntries(int32_t index, int32_t, OP_InfoDATEnt
             value = std::to_string(myWidth) + "x" + std::to_string(myHeight);
             break;
         case 3:
+            key = "levels";
+            value = std::to_string(myLevels);
+            break;
+        case 4:
+            key = "history_length";
+            value = std::to_string(myHistoryLength);
+            break;
+        case 5:
             key = "audio";
             value = myAudioActive ? "active" : "inactive";
             break;
-        case 4:
+        case 6:
             key = "param_overrides";
             if (myUseParams && !myParameterId.empty())
                 value = "dedicated+advanced";
@@ -522,27 +576,27 @@ void DatamoshDctCudaTOP::getInfoDATEntries(int32_t index, int32_t, OP_InfoDATEnt
             else
                 value = "off";
             break;
-        case 5:
+        case 7:
             key = "input_cooks";
             value = std::to_string(myInputCooks);
             break;
-        case 6:
+        case 8:
             key = "cook_stage";
             value = std::to_string(myCookStage);
             break;
-        case 7:
+        case 9:
             key = "pattern_index";
             value = std::to_string(myPatternIndex);
             break;
-        case 8:
+        case 10:
             key = "implementation_version";
             value = std::to_string(kImplementationVersion);
             break;
-        case 9:
+        case 11:
             key = "operator_version";
             value = std::to_string(kOperatorVersion);
             break;
-        case 10:
+        case 12:
             key = "pattern_count";
             value = std::to_string(patternCount());
             break;
@@ -555,17 +609,18 @@ void DatamoshDctCudaTOP::getInfoDATEntries(int32_t index, int32_t, OP_InfoDATEnt
     entries->values[1]->setString(value.c_str());
 }
 
-void DatamoshDctCudaTOP::getErrorString(OP_String* error, void*)
+void DatamoshWaveletCudaTOP::getErrorString(OP_String* error, void*)
 {
     error->setString(myError.c_str());
 }
 
-void DatamoshDctCudaTOP::getWarningString(OP_String* warning, void*)
+void DatamoshWaveletCudaTOP::getWarningString(OP_String* warning, void*)
 {
     warning->setString(myWarning.c_str());
 }
 
-void DatamoshDctCudaTOP::setupParameters(OP_ParameterManager* manager, void*)
+void DatamoshWaveletCudaTOP::setupParameters(
+    OP_ParameterManager* manager, void*)
 {
     OP_StringParameter pattern;
     pattern.name = "Pattern";
@@ -576,16 +631,108 @@ void DatamoshDctCudaTOP::setupParameters(OP_ParameterManager* manager, void*)
 
     appendFloat(manager, "Datamosh", "Intensity", "Intensity", 1.0, 0.0, 2.0, 0.0, 2.0);
     appendFloat(manager, "Datamosh", "Motion", "Structure", 1.0, 0.0, 2.0, 0.0, 2.0);
-    appendFloat(manager, "Datamosh", "Residual", "Persist", 1.0, 0.0, 2.0, 0.0, 2.0);
-    appendFloat(manager, "Datamosh", "Temporal", "DC", 1.0, 0.0, 2.0, 0.0, 2.0);
-    appendFloat(manager, "Datamosh", "Bitstream", "Quant", 1.0, 0.0, 2.0, 0.0, 2.0);
+    appendFloat(
+        manager, "Datamosh", "Residual", "Coefficient", 1.0, 0.0, 2.0, 0.0, 2.0);
+    appendFloat(manager, "Datamosh", "Temporal", "History", 1.0, 0.0, 2.0, 0.0, 2.0);
+    appendFloat(manager, "Datamosh", "Bitstream", "Routing", 1.0, 0.0, 2.0, 0.0, 2.0);
     appendToggle(manager, "Datamosh", "Useparams", "Use Overrides");
 
-    appendFloat(manager, "Codec", "Quality", "Quality", 50.0, 1.0, 100.0, 1.0, 100.0);
+    appendFloat(manager, "Codec", "Quality", "Quality", 82.0, 1.0, 100.0, 1.0, 100.0);
+    appendFloat(manager, "Codec", "Levels", "Levels", 3.0, 1.0, 6.0, 1.0, 12.0);
     appendFloat(
-        manager, "Coefficient", "Quantscale", "Quant Scale", 1.0, 1.0, 16.0, 1.0, 64.0);
+        manager, "Codec", "Historylen", "History Length", 12.0, 1.0, 32.0, 1.0, 128.0);
+
     appendFloat(
-        manager, "Coefficient", "Aczero", "AC Zero Above", 0.0, 0.0, 63.0, 0.0, 63.0);
+        manager,
+        "Structure",
+        "Packetshift",
+        "Packet Shift",
+        0.0,
+        -16.0,
+        16.0,
+        -64.0,
+        64.0,
+        false,
+        false);
+    appendFloat(
+        manager,
+        "Structure",
+        "Packetshiftperiod",
+        "Packet Shift Period",
+        0.0,
+        0.0,
+        64.0,
+        0.0,
+        512.0);
+    appendFloat(
+        manager,
+        "Structure",
+        "Orientation",
+        "Orientation Rotate",
+        0.0,
+        -3.0,
+        3.0,
+        -12.0,
+        12.0,
+        false,
+        false);
+    appendFloat(
+        manager,
+        "Structure",
+        "Orientationperiod",
+        "Orientation Period",
+        0.0,
+        0.0,
+        64.0,
+        0.0,
+        512.0);
+    appendFloat(
+        manager,
+        "Structure",
+        "Levelfold",
+        "Level Fold",
+        0.0,
+        -4.0,
+        4.0,
+        -12.0,
+        12.0,
+        false,
+        false);
+    appendFloat(
+        manager,
+        "Structure",
+        "Levelfoldperiod",
+        "Level Fold Period",
+        0.0,
+        0.0,
+        64.0,
+        0.0,
+        512.0);
+
+    appendFloat(
+        manager, "Coefficient", "Bitclear", "Bitplanes Clear", 0.0, 0.0, 8.0, 0.0, 30.0);
+    appendFloat(
+        manager,
+        "Coefficient",
+        "Bitclearperiod",
+        "Bit Clear Period",
+        0.0,
+        0.0,
+        64.0,
+        0.0,
+        512.0);
+    appendFloat(
+        manager, "Coefficient", "Bitxor", "Bitplane XOR", 0.0, 0.0, 12.0, 0.0, 30.0);
+    appendFloat(
+        manager,
+        "Coefficient",
+        "Bitxorperiod",
+        "Bit XOR Period",
+        0.0,
+        0.0,
+        64.0,
+        0.0,
+        512.0);
     appendFloat(
         manager,
         "Coefficient",
@@ -599,40 +746,20 @@ void DatamoshDctCudaTOP::setupParameters(OP_ParameterManager* manager, void*)
     appendFloat(
         manager,
         "Coefficient",
-        "Coeffshift",
-        "Coeff Shift",
+        "Liftingbias",
+        "Lifting Bias",
         0.0,
-        -32.0,
-        32.0,
-        -63.0,
-        63.0,
+        -64.0,
+        64.0,
+        -512.0,
+        512.0,
         false,
         false);
     appendFloat(
         manager,
         "Coefficient",
-        "Coeffshiftperiod",
-        "Coeff Shift Period",
-        0.0,
-        0.0,
-        64.0,
-        0.0,
-        512.0);
-    appendFloat(
-        manager,
-        "Coefficient",
-        "Zigzagreverse",
-        "Zigzag Reverse Period",
-        0.0,
-        0.0,
-        64.0,
-        0.0,
-        512.0);
-    appendFloat(
-        manager,
-        "Coefficient",
-        "Blocktranspose",
-        "Block Transpose Period",
+        "Liftingperiod",
+        "Lifting Bias Period",
         0.0,
         0.0,
         64.0,
@@ -640,79 +767,45 @@ void DatamoshDctCudaTOP::setupParameters(OP_ParameterManager* manager, void*)
         512.0);
 
     appendFloat(
-        manager,
-        "DC",
-        "Dcdrift",
-        "DC Drift",
-        0.0,
-        -64.0,
-        64.0,
-        -256.0,
-        256.0,
-        false,
-        false);
+        manager, "History", "Historylag", "History Lag", 1.0, 1.0, 16.0, 1.0, 128.0);
     appendFloat(
         manager,
-        "DC",
-        "Dcdriftperiod",
-        "DC Drift Period",
-        0.0,
-        0.0,
-        256.0,
-        0.0,
-        1024.0);
-    appendFloat(
-        manager,
-        "DC",
-        "Dcoffset",
-        "DC Block Offset",
-        0.0,
-        -64.0,
-        64.0,
-        -256.0,
-        256.0,
-        false,
-        false);
-    appendFloat(
-        manager,
-        "DC",
-        "Dcoffsetperiod",
-        "DC Offset Period",
+        "History",
+        "Historyperiod",
+        "History Band Period",
         0.0,
         0.0,
         64.0,
         0.0,
         512.0);
+    appendFloat(
+        manager,
+        "History",
+        "Lowpasslag",
+        "Lowpass History Lag",
+        0.0,
+        0.0,
+        16.0,
+        0.0,
+        128.0);
 
     appendFloat(
         manager,
-        "Block",
-        "Blockshiftx",
-        "Block Shift X",
+        "Routing",
+        "Channelroute",
+        "Channel Route",
         0.0,
-        -16.0,
-        16.0,
-        -64.0,
-        64.0,
+        -2.0,
+        2.0,
+        -8.0,
+        8.0,
         false,
         false);
     appendFloat(
         manager,
-        "Block",
-        "Blockshifty",
-        "Block Shift Y",
-        0.0,
-        -16.0,
-        16.0,
-        -64.0,
-        64.0,
-        false,
-        false);
-    appendFloat(
-        manager,
-        "Block",
-        "Blockshiftperiod",
-        "Block Shift Period",
+        "Routing",
+        "Channelperiod",
+        "Channel Route Period",
         0.0,
         0.0,
         64.0,
@@ -720,34 +813,16 @@ void DatamoshDctCudaTOP::setupParameters(OP_ParameterManager* manager, void*)
         512.0);
     appendFloat(
         manager,
-        "Block",
-        "Blockrepeat",
-        "Block Repeat Period",
+        "Routing",
+        "Packetloss",
+        "Packet Loss Period",
         0.0,
         0.0,
         64.0,
         0.0,
         512.0);
-    appendFloat(
-        manager,
-        "Block",
-        "Chromaswap",
-        "Chroma Swap Period",
-        0.0,
-        0.0,
-        64.0,
-        0.0,
-        512.0);
-    appendFloat(
-        manager,
-        "Temporal",
-        "Persistence",
-        "Persistence",
-        0.0,
-        0.0,
-        0.98,
-        0.0,
-        0.98);
+    appendToggle(
+        manager, "Routing", "Packetconceal", "Conceal From History", 1.0);
 
     appendString(manager, "Advanced", "Paramid", "Param ID");
     appendFloat(
@@ -793,9 +868,9 @@ void DatamoshDctCudaTOP::setupParameters(OP_ParameterManager* manager, void*)
         false);
     appendString(manager, "Audio", "Intensitychan", "Intensity Chan", "0");
     appendString(manager, "Audio", "Motionchan", "Structure Chan");
-    appendString(manager, "Audio", "Residualchan", "Persist Chan");
-    appendString(manager, "Audio", "Temporalchan", "DC Chan");
-    appendString(manager, "Audio", "Bitstreamchan", "Quant Chan");
+    appendString(manager, "Audio", "Residualchan", "Coefficient Chan");
+    appendString(manager, "Audio", "Temporalchan", "History Chan");
+    appendString(manager, "Audio", "Bitstreamchan", "Routing Chan");
     appendString(manager, "Audio", "Resetchan", "Reset Chan");
     appendFloat(
         manager,
@@ -823,7 +898,7 @@ void DatamoshDctCudaTOP::setupParameters(OP_ParameterManager* manager, void*)
     manager->appendPulse(recreate);
 }
 
-void DatamoshDctCudaTOP::pulsePressed(const char* name, void*)
+void DatamoshWaveletCudaTOP::pulsePressed(const char* name, void*)
 {
     if (!std::strcmp(name, "Resetglitch"))
         myResetPending = true;
@@ -834,7 +909,7 @@ void DatamoshDctCudaTOP::pulsePressed(const char* name, void*)
     }
 }
 
-void DatamoshDctCudaTOP::applyAudioControlInputs(
+void DatamoshWaveletCudaTOP::applyAudioControlInputs(
     const OP_Inputs* inputs)
 {
     myAudioActive = false;
@@ -865,9 +940,9 @@ void DatamoshDctCudaTOP::applyAudioControlInputs(
 
     applyChannel("Intensitychan", myIntensity);
     applyChannel("Motionchan", myStructure);
-    applyChannel("Residualchan", myPersist);
-    applyChannel("Temporalchan", myDc);
-    applyChannel("Bitstreamchan", myQuant);
+    applyChannel("Residualchan", myCoefficient);
+    applyChannel("Temporalchan", myHistory);
+    applyChannel("Bitstreamchan", myRouting);
 
     const char* resetChannel = inputs->getParString("Resetchan");
     bool resetFound = false;
@@ -892,36 +967,44 @@ void DatamoshDctCudaTOP::applyAudioControlInputs(
     }
 }
 
-bool DatamoshDctCudaTOP::ensureState(int width, int height)
+bool DatamoshWaveletCudaTOP::ensureState(
+    int width, int height, int levels, int historyLength)
 {
-    if (myState && width == myWidth && height == myHeight)
+    if (myState && width == myWidth && height == myHeight &&
+        levels == myLevels && historyLength == myHistoryLength)
         return true;
 
     releaseState();
-    cudaError_t status = datamoshDctCudaCreate(&myState, width, height);
+    cudaError_t status = datamoshWaveletCudaCreate(
+        &myState, width, height, levels, historyLength);
     if (status != cudaSuccess)
     {
-        setCudaError("datamoshDctCudaCreate", status);
+        setCudaError("datamoshWaveletCudaCreate", status);
         return false;
     }
     myWidth = width;
     myHeight = height;
+    myLevels = levels;
+    myHistoryLength = historyLength;
     myResetPending = true;
     return true;
 }
 
-void DatamoshDctCudaTOP::releaseState()
+void DatamoshWaveletCudaTOP::releaseState()
 {
     if (myState)
     {
-        datamoshDctCudaDestroy(myState);
+        datamoshWaveletCudaDestroy(myState);
         myState = nullptr;
     }
     myWidth = 0;
     myHeight = 0;
+    myLevels = 0;
+    myHistoryLength = 0;
 }
 
-void DatamoshDctCudaTOP::setCudaError(const char* operation, cudaError_t error)
+void DatamoshWaveletCudaTOP::setCudaError(
+    const char* operation, cudaError_t error)
 {
     myError = operation;
     myError += ": ";
@@ -935,22 +1018,24 @@ DLLEXPORT void FillTOPPluginInfo(TOP_PluginInfo* info)
     if (!info->setAPIVersion(TOPCPlusPlusAPIVersion))
         return;
     info->executeMode = TOP_ExecuteMode::CUDA;
-    info->customOPInfo.opType->setString("Datamoshdctcuda");
-    info->customOPInfo.opLabel->setString("Datamosh DCT CUDA TOP");
-    info->customOPInfo.opIcon->setString("DXC");
+    info->customOPInfo.opType->setString("Datamoshwaveletcuda");
+    info->customOPInfo.opLabel->setString("Datamosh Wavelet CUDA TOP");
+    info->customOPInfo.opIcon->setString("WVC");
     info->customOPInfo.authorName->setString("datamosh");
     info->customOPInfo.minInputs = 1;
     info->customOPInfo.maxInputs = 1;
 }
 
-DLLEXPORT TOP_CPlusPlusBase* CreateTOPInstance(const OP_NodeInfo* info, TOP_Context* context)
+DLLEXPORT TOP_CPlusPlusBase* CreateTOPInstance(
+    const OP_NodeInfo* info, TOP_Context* context)
 {
-    return new DatamoshDctCudaTOP(info, context);
+    return new DatamoshWaveletCudaTOP(info, context);
 }
 
-DLLEXPORT void DestroyTOPInstance(TOP_CPlusPlusBase* instance, TOP_Context*)
+DLLEXPORT void DestroyTOPInstance(
+    TOP_CPlusPlusBase* instance, TOP_Context*)
 {
-    delete static_cast<DatamoshDctCudaTOP*>(instance);
+    delete static_cast<DatamoshWaveletCudaTOP*>(instance);
 }
 
 }

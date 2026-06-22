@@ -3,7 +3,8 @@ param(
     [string]$VisualStudioPath = '',
     [switch]$ReleaseRust,
     [switch]$Scanline,
-    [switch]$Dct
+    [switch]$Dct,
+    [switch]$Wavelet
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,19 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $source = Join-Path $root 'touchdesigner\DatamoshTOP\DatamoshTOP.cpp'
 $outputDir = Join-Path $root 'target\release'
-$targetName = if ($Scanline) { 'ScanlineSignalTOP' } elseif ($Dct) { 'DatamoshDctTOP' } else { 'DatamoshTOP' }
+$selectedVariants = @($Scanline, $Dct, $Wavelet).Where({ $_ }).Count
+if ($selectedVariants -gt 1) {
+    throw 'Select at most one of -Scanline, -Dct, or -Wavelet.'
+}
+$targetName = if ($Scanline) {
+    'DatamoshScanlineTOP'
+} elseif ($Dct) {
+    'DatamoshDctTOP'
+} elseif ($Wavelet) {
+    'DatamoshWaveletTOP'
+} else {
+    'DatamoshTOP'
+}
 $output = Join-Path $outputDir "$targetName.dll"
 $obj = Join-Path $outputDir "$targetName.obj"
 $pdb = Join-Path $outputDir "$targetName.pdb"
@@ -97,6 +110,9 @@ if ($Scanline) {
 }
 if ($Dct) {
     $clArgs += '/DDCT_TRANSFORM_TOP'
+}
+if ($Wavelet) {
+    $clArgs += '/DWAVELET_PYRAMID_TOP'
 }
 
 $clArgs | ForEach-Object { Format-RspArg $_ } | Set-Content -LiteralPath $rsp -Encoding ASCII

@@ -89,6 +89,36 @@ const char* kPatternLabels[] = {
     "Scan Shred",
     "Entropy Truncate",
 };
+#elif defined(WAVELET_PYRAMID_TOP)
+constexpr int32_t kPatternSchemaVersion = 1;
+constexpr const char* kOperatorLabel = "Datamosh Wavelet TOP";
+const char* kPatternNames[] = {
+    "clean",
+    "subband-slip",
+    "orientation-cross",
+    "scale-fold",
+    "bitplane-rain",
+    "lowpass-ghost",
+    "temporal-weave",
+    "packet-loss",
+    "lifting-drift",
+    "chroma-pyramid",
+    "hierarchy-collapse",
+};
+
+const char* kPatternLabels[] = {
+    "Clean",
+    "Subband Packet Slip",
+    "Orientation Cross",
+    "Scale Fold",
+    "Bitplane Rain",
+    "Lowpass Ghost",
+    "Temporal Pyramid Weave",
+    "Packet Loss Concealment",
+    "Lifting State Drift",
+    "Chroma Pyramid Route",
+    "Hierarchy Collapse",
+};
 #else
 constexpr int32_t kPatternSchemaVersion = 2;
 constexpr const char* kOperatorLabel = "Datamosh Motion TOP";
@@ -190,6 +220,27 @@ constexpr ParameterBinding kParameterBindings[] = {
     {"Slipwindow", "slip_window"},
     {"Truncate", "truncate_tail"},
     {"Persistence", "persistence"},
+#elif defined(WAVELET_PYRAMID_TOP)
+    {"Packetshift", "packet_shift"},
+    {"Packetshiftperiod", "packet_shift_every"},
+    {"Orientation", "orientation_rotate"},
+    {"Orientationperiod", "orientation_rotate_every"},
+    {"Levelfold", "level_fold"},
+    {"Levelfoldperiod", "level_fold_every"},
+    {"Channelroute", "channel_route"},
+    {"Channelperiod", "channel_route_every"},
+    {"Packetloss", "packet_loss_every"},
+    {"Packetconceal", "packet_loss_conceal"},
+    {"Bitclear", "bitplane_clear"},
+    {"Bitclearperiod", "bitplane_clear_every"},
+    {"Bitxor", "bitplane_xor"},
+    {"Bitxorperiod", "bitplane_xor_every"},
+    {"Signflip", "sign_flip_every"},
+    {"Historylag", "history_lag"},
+    {"Historyperiod", "history_band_every"},
+    {"Lowpasslag", "lowpass_history_lag"},
+    {"Liftingbias", "lifting_bias"},
+    {"Liftingperiod", "lifting_bias_every"},
 #else
     {"Mvscale", "mv_scale"},
     {"Mvjitter", "mv_jitter"},
@@ -219,7 +270,8 @@ int32_t patternCount()
 
 std::string presetForPattern(const std::string& pattern)
 {
-#if !defined(SCANLINE_SIGNAL_TOP) && !defined(DCT_TRANSFORM_TOP)
+#if !defined(SCANLINE_SIGNAL_TOP) && !defined(DCT_TRANSFORM_TOP) && \
+    !defined(WAVELET_PYRAMID_TOP)
     if (pattern == "entropyhard")
         return "entropy-hard";
     if (pattern == "coeffhard")
@@ -632,6 +684,8 @@ public:
             case 9:
 #if defined(SCANLINE_SIGNAL_TOP)
                 chan->name->setString("timebase");
+#elif defined(WAVELET_PYRAMID_TOP)
+                chan->name->setString("structure");
 #else
                 chan->name->setString("motion");
 #endif
@@ -640,6 +694,8 @@ public:
             case 10:
 #if defined(SCANLINE_SIGNAL_TOP)
                 chan->name->setString("carrier");
+#elif defined(WAVELET_PYRAMID_TOP)
+                chan->name->setString("coefficient");
 #else
                 chan->name->setString("residual");
 #endif
@@ -648,6 +704,8 @@ public:
             case 11:
 #if defined(SCANLINE_SIGNAL_TOP)
                 chan->name->setString("prediction");
+#elif defined(WAVELET_PYRAMID_TOP)
+                chan->name->setString("history");
 #else
                 chan->name->setString("temporal");
 #endif
@@ -656,6 +714,8 @@ public:
             case 12:
 #if defined(SCANLINE_SIGNAL_TOP)
                 chan->name->setString("packet");
+#elif defined(WAVELET_PYRAMID_TOP)
+                chan->name->setString("routing");
 #else
                 chan->name->setString("bitstream");
 #endif
@@ -800,6 +860,8 @@ public:
             configureFloat(np, "Motion", "Timebase", 1.0, 0.0, 2.0, 0.0, 2.0);
 #elif defined(DCT_TRANSFORM_TOP)
             configureFloat(np, "Motion", "Structure", 1.0, 0.0, 2.0, 0.0, 2.0);
+#elif defined(WAVELET_PYRAMID_TOP)
+            configureFloat(np, "Motion", "Structure", 1.0, 0.0, 2.0, 0.0, 2.0);
 #else
             configureFloat(np, "Motion", "Motion", 1.0, 0.0, 2.0, 0.0, 2.0);
 #endif
@@ -811,6 +873,8 @@ public:
             configureFloat(np, "Residual", "Carrier", 1.0, 0.0, 2.0, 0.0, 2.0);
 #elif defined(DCT_TRANSFORM_TOP)
             configureFloat(np, "Residual", "Persist", 1.0, 0.0, 2.0, 0.0, 2.0);
+#elif defined(WAVELET_PYRAMID_TOP)
+            configureFloat(np, "Residual", "Coefficient", 1.0, 0.0, 2.0, 0.0, 2.0);
 #else
             configureFloat(np, "Residual", "Residual", 1.0, 0.0, 2.0, 0.0, 2.0);
 #endif
@@ -822,6 +886,8 @@ public:
             configureFloat(np, "Temporal", "Prediction", 1.0, 0.0, 2.0, 0.0, 2.0);
 #elif defined(DCT_TRANSFORM_TOP)
             configureFloat(np, "Temporal", "DC", 1.0, 0.0, 2.0, 0.0, 2.0);
+#elif defined(WAVELET_PYRAMID_TOP)
+            configureFloat(np, "Temporal", "History", 1.0, 0.0, 2.0, 0.0, 2.0);
 #else
             configureFloat(np, "Temporal", "Temporal", 1.0, 0.0, 2.0, 0.0, 2.0);
 #endif
@@ -833,6 +899,8 @@ public:
             configureFloat(np, "Bitstream", "Packet", 1.0, 0.0, 2.0, 0.0, 2.0);
 #elif defined(DCT_TRANSFORM_TOP)
             configureFloat(np, "Bitstream", "Quant", 1.0, 0.0, 2.0, 0.0, 2.0);
+#elif defined(WAVELET_PYRAMID_TOP)
+            configureFloat(np, "Bitstream", "Routing", 1.0, 0.0, 2.0, 0.0, 2.0);
 #else
             configureFloat(np, "Bitstream", "Bitstream", 1.0, 0.0, 2.0, 0.0, 2.0);
 #endif
@@ -957,6 +1025,50 @@ public:
         appendFloat(manager, "Entropy", "Slipwindow", "Slip Window", 64.0, 2.0, 256.0, 1.0,
                     4096.0);
         appendFloat(manager, "Entropy", "Truncate", "Truncate Tail", 0.0, 0.0, 1.0, 0.0, 1.0);
+#elif defined(WAVELET_PYRAMID_TOP)
+        appendFloat(manager, "Codec", "Quality", "Quality", 82.0, 1.0, 100.0, 1.0, 100.0);
+        appendFloat(manager, "Codec", "Levels", "Levels", 3.0, 1.0, 6.0, 1.0, 12.0);
+        appendFloat(manager, "Codec", "Historylen", "History Length", 12.0, 1.0, 32.0, 1.0,
+                    128.0);
+        appendFloat(manager, "Structure", "Packetshift", "Packet Shift", 0.0, -16.0, 16.0,
+                    -64.0, 64.0, false, false);
+        appendFloat(manager, "Structure", "Packetshiftperiod", "Packet Shift Period", 0.0, 0.0,
+                    64.0, 0.0, 512.0);
+        appendFloat(manager, "Structure", "Orientation", "Orientation Rotate", 0.0, -3.0, 3.0,
+                    -12.0, 12.0, false, false);
+        appendFloat(manager, "Structure", "Orientationperiod", "Orientation Period", 0.0, 0.0,
+                    64.0, 0.0, 512.0);
+        appendFloat(manager, "Structure", "Levelfold", "Level Fold", 0.0, -4.0, 4.0, -12.0,
+                    12.0, false, false);
+        appendFloat(manager, "Structure", "Levelfoldperiod", "Level Fold Period", 0.0, 0.0,
+                    64.0, 0.0, 512.0);
+        appendFloat(manager, "Coefficient", "Bitclear", "Bitplanes Clear", 0.0, 0.0, 8.0, 0.0,
+                    30.0);
+        appendFloat(manager, "Coefficient", "Bitclearperiod", "Bit Clear Period", 0.0, 0.0,
+                    64.0, 0.0, 512.0);
+        appendFloat(manager, "Coefficient", "Bitxor", "Bitplane XOR", 0.0, 0.0, 12.0, 0.0,
+                    30.0);
+        appendFloat(manager, "Coefficient", "Bitxorperiod", "Bit XOR Period", 0.0, 0.0, 64.0,
+                    0.0, 512.0);
+        appendFloat(manager, "Coefficient", "Signflip", "Sign Flip Period", 0.0, 0.0, 64.0, 0.0,
+                    512.0);
+        appendFloat(manager, "Coefficient", "Liftingbias", "Lifting Bias", 0.0, -64.0, 64.0,
+                    -512.0, 512.0, false, false);
+        appendFloat(manager, "Coefficient", "Liftingperiod", "Lifting Bias Period", 0.0, 0.0,
+                    64.0, 0.0, 512.0);
+        appendFloat(manager, "History", "Historylag", "History Lag", 1.0, 1.0, 16.0, 1.0,
+                    128.0);
+        appendFloat(manager, "History", "Historyperiod", "History Band Period", 0.0, 0.0, 64.0,
+                    0.0, 512.0);
+        appendFloat(manager, "History", "Lowpasslag", "Lowpass History Lag", 0.0, 0.0, 16.0,
+                    0.0, 128.0);
+        appendFloat(manager, "Routing", "Channelroute", "Channel Route", 0.0, -2.0, 2.0, -8.0,
+                    8.0, false, false);
+        appendFloat(manager, "Routing", "Channelperiod", "Channel Route Period", 0.0, 0.0, 64.0,
+                    0.0, 512.0);
+        appendFloat(manager, "Routing", "Packetloss", "Packet Loss Period", 0.0, 0.0, 64.0, 0.0,
+                    512.0);
+        appendToggle(manager, "Routing", "Packetconceal", "Conceal From History", 1.0);
 #else
         appendFloat(manager, "Motion", "Mvscale", "MV Scale", 1.0, 0.0, 2.0, 0.0, 2.0);
         appendFloat(manager, "Motion", "Mvjitter", "MV Jitter", 0.0, 0.0, 16.0, 0.0, 16.0);
@@ -1020,6 +1132,11 @@ public:
         appendString(manager, "Audio", "Residualchan", "Carrier Chan", "");
         appendString(manager, "Audio", "Temporalchan", "Prediction Chan", "");
         appendString(manager, "Audio", "Bitstreamchan", "Packet Chan", "");
+#elif defined(WAVELET_PYRAMID_TOP)
+        appendString(manager, "Audio", "Motionchan", "Structure Chan", "");
+        appendString(manager, "Audio", "Residualchan", "Coefficient Chan", "");
+        appendString(manager, "Audio", "Temporalchan", "History Chan", "");
+        appendString(manager, "Audio", "Bitstreamchan", "Routing Chan", "");
 #else
         appendString(manager, "Audio", "Motionchan", "Motion Chan", "");
         appendString(manager, "Audio", "Residualchan", "Residual Chan", "");
@@ -1122,6 +1239,8 @@ private:
         myRequestedBackend = DATAMOSH_BACKEND_SCANLINE_SIGNAL_V1;
 #elif defined(DCT_TRANSFORM_TOP)
         myRequestedBackend = DATAMOSH_BACKEND_DCT_TRANSFORM_V1;
+#elif defined(WAVELET_PYRAMID_TOP)
+        myRequestedBackend = DATAMOSH_BACKEND_WAVELET_PYRAMID_V1;
 #else
         myRequestedBackend = DATAMOSH_BACKEND_RAW_MOSH_V1;
 #endif
@@ -1139,6 +1258,13 @@ private:
 #if defined(DCT_TRANSFORM_TOP)
         myDctQuality =
             std::clamp(static_cast<float>(inputs->getParDouble("Quality")), 1.0f, 100.0f);
+#elif defined(WAVELET_PYRAMID_TOP)
+        myWaveletQuality =
+            std::clamp(static_cast<float>(inputs->getParDouble("Quality")), 1.0f, 100.0f);
+        myWaveletLevels =
+            std::clamp(static_cast<float>(inputs->getParDouble("Levels")), 1.0f, 12.0f);
+        myWaveletHistoryLength =
+            std::clamp(static_cast<float>(inputs->getParDouble("Historylen")), 1.0f, 128.0f);
 #endif
         myUseParams = inputs->getParInt("Useparams") != 0;
 
@@ -1261,6 +1387,28 @@ private:
             if (myLastStatus != DATAMOSH_STATUS_OK)
                 return false;
             myAppliedDctQuality = myDctQuality;
+        }
+#elif defined(WAVELET_PYRAMID_TOP)
+        if (myWaveletQuality != myAppliedWaveletQuality)
+        {
+            setStatus(myRuntime.setParameter(myEngine, "quality", myWaveletQuality));
+            if (myLastStatus != DATAMOSH_STATUS_OK)
+                return false;
+            myAppliedWaveletQuality = myWaveletQuality;
+        }
+        if (myWaveletLevels != myAppliedWaveletLevels)
+        {
+            setStatus(myRuntime.setParameter(myEngine, "levels", myWaveletLevels));
+            if (myLastStatus != DATAMOSH_STATUS_OK)
+                return false;
+            myAppliedWaveletLevels = myWaveletLevels;
+        }
+        if (myWaveletHistoryLength != myAppliedWaveletHistoryLength)
+        {
+            setStatus(myRuntime.setParameter(myEngine, "history_len", myWaveletHistoryLength));
+            if (myLastStatus != DATAMOSH_STATUS_OK)
+                return false;
+            myAppliedWaveletHistoryLength = myWaveletHistoryLength;
         }
 #endif
 
@@ -1386,6 +1534,10 @@ private:
         resetAppliedOverrideState();
 #if defined(DCT_TRANSFORM_TOP)
         myAppliedDctQuality = 50.0f;
+#elif defined(WAVELET_PYRAMID_TOP)
+        myAppliedWaveletQuality = 82.0f;
+        myAppliedWaveletLevels = 3.0f;
+        myAppliedWaveletHistoryLength = 12.0f;
 #endif
         updateResolutionText();
     }
@@ -1444,6 +1596,8 @@ private:
     uint32_t myRequestedBackend = DATAMOSH_BACKEND_SCANLINE_SIGNAL_V1;
 #elif defined(DCT_TRANSFORM_TOP)
     uint32_t myRequestedBackend = DATAMOSH_BACKEND_DCT_TRANSFORM_V1;
+#elif defined(WAVELET_PYRAMID_TOP)
+    uint32_t myRequestedBackend = DATAMOSH_BACKEND_WAVELET_PYRAMID_V1;
 #else
     uint32_t myRequestedBackend = DATAMOSH_BACKEND_RAW_MOSH_V1;
 #endif
@@ -1458,6 +1612,13 @@ private:
 #if defined(DCT_TRANSFORM_TOP)
     float myDctQuality = 50.0f;
     float myAppliedDctQuality = 50.0f;
+#elif defined(WAVELET_PYRAMID_TOP)
+    float myWaveletQuality = 82.0f;
+    float myAppliedWaveletQuality = 82.0f;
+    float myWaveletLevels = 3.0f;
+    float myAppliedWaveletLevels = 3.0f;
+    float myWaveletHistoryLength = 12.0f;
+    float myAppliedWaveletHistoryLength = 12.0f;
 #endif
     float myParameterValue = 0.0f;
     float myAudioResetValue = 0.0f;
@@ -1506,13 +1667,17 @@ void FillTOPPluginInfo(TOP_PluginInfo* info)
 
     info->executeMode = TOP_ExecuteMode::CPUMem;
 #if defined(SCANLINE_SIGNAL_TOP)
-    info->customOPInfo.opType->setString("Scanlinesignal");
+    info->customOPInfo.opType->setString("Datamoshscanline");
     info->customOPInfo.opLabel->setString(kOperatorLabel);
     info->customOPInfo.opIcon->setString("SCN");
 #elif defined(DCT_TRANSFORM_TOP)
     info->customOPInfo.opType->setString("Datamoshdct");
     info->customOPInfo.opLabel->setString(kOperatorLabel);
     info->customOPInfo.opIcon->setString("DCT");
+#elif defined(WAVELET_PYRAMID_TOP)
+    info->customOPInfo.opType->setString("Datamoshwavelet");
+    info->customOPInfo.opLabel->setString(kOperatorLabel);
+    info->customOPInfo.opIcon->setString("WVT");
 #else
     info->customOPInfo.opType->setString("Datamosh");
     info->customOPInfo.opLabel->setString(kOperatorLabel);

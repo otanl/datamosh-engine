@@ -2,7 +2,7 @@
 
 TouchDesigner CPU TOP for the DCT0 transform-domain codec (JPEG/DV-style).
 
-This is a separate operator from `DatamoshTOP` (motion) and `ScanlineSignalTOP` (analog
+This is a separate operator from `DatamoshTOP` (motion) and `DatamoshScanlineTOP` (analog
 signal). It is fixed to C ABI backend `3`, `dct_transform_v1`, and exposes only the
 parameters that exist in the DCT0 representation. It is built from the shared CPU TOP
 source (`DatamoshTOP.cpp`) with `DCT_TRANSFORM_TOP` defined.

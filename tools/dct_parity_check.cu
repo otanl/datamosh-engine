@@ -50,17 +50,13 @@ static void makeImage(std::vector<unsigned char>& rgb, std::vector<uchar4>& bgra
         }
 }
 
-static void runCuda(
-    int idx,
-    float intensity,
+static void runCudaParams(
+    DatamoshDctCudaParams p,
     int frames,
     const std::vector<uchar4>& in,
     std::vector<uchar4>& out)
 {
-    DatamoshDctCudaParams p = dctcuda::presetParams(idx);
-    dctcuda::applyControls(p, intensity, 1, 1, 1, 1);
     p.inputFormat = 0; // BGRA8, matches the test buffer
-    p.quality = 50;    // CPU DctCodecConfig default
 
     cudaChannelFormatDesc desc = cudaCreateChannelDesc<uchar4>();
     cudaArray_t inArr, outArr;
@@ -90,6 +86,19 @@ static void runCuda(
     cudaDestroySurfaceObject(outS);
     cudaFreeArray(inArr);
     cudaFreeArray(outArr);
+}
+
+static void runCuda(
+    int idx,
+    float intensity,
+    int frames,
+    const std::vector<uchar4>& in,
+    std::vector<uchar4>& out)
+{
+    DatamoshDctCudaParams p = dctcuda::presetParams(idx);
+    dctcuda::applyControls(p, intensity, 1, 1, 1, 1);
+    p.quality = 50;
+    runCudaParams(p, frames, in, out);
 }
 
 int main()
@@ -168,6 +177,83 @@ int main()
             printf("  %-12s : intensity-zero bypass DRIFT\n", name);
             ++fails;
         }
+    }
+
+    {
+        struct Override
+        {
+            const char* id;
+            float value;
+        };
+        constexpr Override overrides[] = {
+            {"quality", 72},
+            {"quant_scale", 3.5f},
+            {"dc_drift", -9},
+            {"dc_drift_every", 13},
+            {"dc_block_offset", 17},
+            {"dc_block_offset_every", 5},
+            {"ac_zero_above", 9},
+            {"coeff_sign_flip_every", 7},
+            {"coeff_shift", -5},
+            {"coeff_shift_every", 3},
+            {"block_shift_x", -2},
+            {"block_shift_y", 1},
+            {"block_shift_every", 11},
+            {"block_repeat_every", 17},
+            {"zigzag_reverse_every", 19},
+            {"block_transpose_every", 23},
+            {"chroma_swap_every", 5},
+            {"persistence", 0.35f},
+        };
+        DatamoshMoshEngine* engine =
+            datamosh_mosh_engine_new_with_backend(
+                DATAMOSH_BACKEND_DCT_TRANSFORM_V1, W, H);
+        int status = engine ? datamosh_mosh_engine_set_preset(engine, "composite") : -1;
+        DatamoshDctCudaParams params =
+            dctcuda::presetParams(dctcuda::patternIndex("composite"));
+        for (const Override& overrideValue : overrides)
+        {
+            if (status == 0)
+                status = datamosh_mosh_engine_set_parameter(
+                    engine, overrideValue.id, overrideValue.value);
+            dctcuda::setParameter(params, overrideValue.id, overrideValue.value);
+        }
+        if (status == 0)
+            status = datamosh_mosh_engine_set_controls(
+                engine, 0.75f, 3.0f, 1.5f, 2.5f, 0.6f);
+        dctcuda::applyControls(params, 0.75f, 3.0f, 1.5f, 2.5f, 0.6f);
+
+        std::vector<unsigned char> cpuOut(len, 0);
+        for (int frame = 0; frame < frames && status == 0; ++frame)
+            status = datamosh_mosh_engine_process_rgb24(
+                engine, inRgb.data(), len, cpuOut.data(), len);
+        std::vector<uchar4> cudaOut;
+        if (status == 0)
+            runCudaParams(params, frames, inBgra, cudaOut);
+
+        double err = 0.0;
+        if (status == 0)
+        {
+            for (int i = 0; i < W * H; ++i)
+            {
+                err += std::abs((int)cpuOut[i * 3 + 0] - (int)cudaOut[i].z);
+                err += std::abs((int)cpuOut[i * 3 + 1] - (int)cudaOut[i].y);
+                err += std::abs((int)cpuOut[i * 3 + 2] - (int)cudaOut[i].x);
+            }
+        }
+        const double mae =
+            status == 0 ? err / ((double)W * H * 3) : THRESHOLD + 1.0;
+        const bool ok = status == 0 && mae <= THRESHOLD;
+        printf("  %-12s : MAE=%6.2f  %s\n", "manual", mae, ok ? "ok" : "DRIFT");
+        if (!ok)
+            ++fails;
+        if (mae > worst)
+        {
+            worst = mae;
+            worstName = "manual";
+        }
+        if (engine)
+            datamosh_mosh_engine_free(engine);
     }
     printf("worst: %s MAE=%.2f  => %s\n", worstName, worst, fails ? "FAIL" : "PASS");
     return fails ? 1 : 0;

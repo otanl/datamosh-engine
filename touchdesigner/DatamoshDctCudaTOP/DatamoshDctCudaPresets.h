@@ -10,6 +10,7 @@
 #include "DatamoshDctCudaCore.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <cstring>
 
@@ -139,10 +140,10 @@ inline void applyControls(
     DatamoshDctCudaParams& p, float intensity, float structure, float persist, float dc,
     float quant)
 {
-    float master = std::max(0.0f, intensity);
-    float quantAmt = master * std::max(0.0f, quant);
-    float dcAmt = master * std::max(0.0f, dc);
-    float structAmt = master * std::max(0.0f, structure);
+    const float master = std::clamp(intensity, 0.0f, 2.0f);
+    const float quantAmt = master * std::clamp(quant, 0.0f, 2.0f);
+    const float dcAmt = master * std::clamp(dc, 0.0f, 2.0f);
+    const float structAmt = master * std::clamp(structure, 0.0f, 2.0f);
     p.quantScale = std::max(1.0f, 1.0f + (p.quantScale - 1.0f) * quantAmt);
     p.dcDrift = scaleInt(p.dcDrift, dcAmt);
     p.dcDriftEvery = scalePeriod(p.dcDriftEvery, dcAmt);
@@ -160,7 +161,80 @@ inline void applyControls(
     p.blockTransposeEvery = scalePeriod(p.blockTransposeEvery, structAmt);
     p.chromaSwapEvery = scalePeriod(p.chromaSwapEvery, structAmt);
     p.persistence =
-        std::clamp(p.persistence * master * std::max(0.0f, persist), 0.0f, 0.98f);
+        std::clamp(
+            p.persistence * master * std::clamp(persist, 0.0f, 2.0f),
+            0.0f,
+            0.98f);
+}
+
+inline int roundedInt(float value, int minimum, int maximum)
+{
+    if (!std::isfinite(value))
+        value = 0.0f;
+    return std::clamp(static_cast<int>(std::lround(value)), minimum, maximum);
+}
+
+inline bool setParameter(
+    DatamoshDctCudaParams& p,
+    const char* id,
+    float value)
+{
+    if (!id || !*id)
+        return false;
+    if (!std::isfinite(value))
+        value = 0.0f;
+
+    if (!std::strcmp(id, "quality"))
+        p.quality = roundedInt(value, 1, 100);
+    else if (!std::strcmp(id, "quant_scale"))
+        p.quantScale = std::max(1.0f, value);
+    else if (!std::strcmp(id, "dc_drift"))
+        p.dcDrift = roundedInt(value, INT16_MIN, INT16_MAX);
+    else if (!std::strcmp(id, "dc_drift_every"))
+        p.dcDriftEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "dc_block_offset"))
+        p.dcBlockOffset = roundedInt(value, INT16_MIN, INT16_MAX);
+    else if (!std::strcmp(id, "dc_block_offset_every"))
+        p.dcBlockOffsetEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "ac_zero_above"))
+        p.acZeroAbove = roundedInt(value, 0, 63);
+    else if (!std::strcmp(id, "coeff_sign_flip_every"))
+        p.signFlipEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "coeff_shift"))
+        p.coeffShift = roundedInt(value, INT16_MIN, INT16_MAX);
+    else if (!std::strcmp(id, "coeff_shift_every"))
+        p.coeffShiftEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "block_shift_x"))
+        p.blockShiftX = roundedInt(value, INT16_MIN, INT16_MAX);
+    else if (!std::strcmp(id, "block_shift_y"))
+        p.blockShiftY = roundedInt(value, INT16_MIN, INT16_MAX);
+    else if (!std::strcmp(id, "block_shift_every"))
+        p.blockShiftEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "block_repeat_every"))
+        p.blockRepeatEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "zigzag_reverse_every"))
+        p.zigzagReverseEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "block_transpose_every"))
+        p.blockTransposeEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "chroma_swap_every"))
+        p.chromaSwapEvery = roundedInt(value, 0, INT32_MAX);
+    else if (!std::strcmp(id, "persistence"))
+        p.persistence = std::clamp(value, 0.0f, 0.98f);
+    else
+        return false;
+    return true;
+}
+
+inline bool isEntropyParameter(const char* id)
+{
+    if (!id)
+        return false;
+    return !std::strcmp(id, "byte_flip_every") ||
+           !std::strcmp(id, "drop_every") ||
+           !std::strcmp(id, "slip_every") ||
+           !std::strcmp(id, "slip_bytes") ||
+           !std::strcmp(id, "slip_window") ||
+           !std::strcmp(id, "truncate_tail");
 }
 
 } // namespace dctcuda

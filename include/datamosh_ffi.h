@@ -24,6 +24,7 @@ extern "C" {
 #define DATAMOSH_BACKEND_RAW_MOSH_V1 1u
 #define DATAMOSH_BACKEND_SCANLINE_SIGNAL_V1 2u
 #define DATAMOSH_BACKEND_DCT_TRANSFORM_V1 3u
+#define DATAMOSH_BACKEND_WAVELET_PYRAMID_V1 4u
 
 typedef struct DatamoshMoshEngine DatamoshMoshEngine;
 

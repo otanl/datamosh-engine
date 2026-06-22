@@ -14,11 +14,11 @@ cargo build --release
 The output is:
 
 ```text
-target\release\ScanlineSignalTOP.dll
+target\release\DatamoshScanlineTOP.dll
 target\release\datamosh.dll
 ```
 
-Keep both DLLs in the same directory and load `ScanlineSignalTOP.dll` as the C++ TOP plugin.
+Keep both DLLs in the same directory and load `DatamoshScanlineTOP.dll` as the C++ TOP plugin.
 
 ## Patterns
 

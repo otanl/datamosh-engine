@@ -12,6 +12,8 @@ pub mod dct_codec;
 pub mod mosh_codec;
 
 pub mod scanline_codec;
+
+pub mod wavelet_codec;
 pub use dct_bitstream::{
     DctBitstreamMutationStats, DctBitstreamParams, apply_dct_bitstream_controls,
     decode_dct_bitstream, encode_dct_bitstream, load_dct_bitstream_preset, mutate_dct_bitstream,
@@ -29,6 +31,11 @@ pub use mosh_codec::{
 pub use scanline_codec::{
     ScanlineCodec, ScanlineCodecConfig, ScanlineCodecStats, ScanlineGlitchParams,
     ScanlineMutationStats, mutate_scanline_bitstream,
+};
+pub use wavelet_codec::{
+    WaveletBand, WaveletCodec, WaveletCodecConfig, WaveletCodecStats, WaveletGlitchParams,
+    WaveletMutationStats, WaveletOrientation, WaveletPacket, apply_wavelet_controls,
+    load_wavelet_preset, set_wavelet_parameter,
 };
 
 pub const RAW_RGB_CHANNELS: usize = 3;
@@ -341,6 +348,7 @@ pub enum MoshEngineBackend {
     RawMoshV1 = 1,
     ScanlineSignalV1 = 2,
     DctTransformV1 = 3,
+    WaveletPyramidV1 = 4,
 }
 
 impl MoshEngineBackend {
@@ -349,6 +357,7 @@ impl MoshEngineBackend {
             1 => Some(Self::RawMoshV1),
             2 => Some(Self::ScanlineSignalV1),
             3 => Some(Self::DctTransformV1),
+            4 => Some(Self::WaveletPyramidV1),
             _ => None,
         }
     }
@@ -362,6 +371,7 @@ impl MoshEngineBackend {
             Self::RawMoshV1 => "raw_mosh_v1",
             Self::ScanlineSignalV1 => "scanline_signal_v1",
             Self::DctTransformV1 => "dct_transform_v1",
+            Self::WaveletPyramidV1 => "wavelet_pyramid_v1",
         }
     }
 }
@@ -382,6 +392,10 @@ pub struct MoshEngine {
     dct_params: DctGlitchParams,
     dct_bitstream: DctBitstreamParams,
     dct_stats: MoshCodecStats,
+    wavelet_config: WaveletCodecConfig,
+    wavelet_codec: Option<WaveletCodec>,
+    wavelet_params: WaveletGlitchParams,
+    wavelet_stats: MoshCodecStats,
     controls: RawMoshControls,
     rgb_input: Vec<u8>,
     rgb_output: Vec<u8>,
@@ -412,15 +426,20 @@ impl MoshEngine {
         let frame_len = config.frame_len().unwrap_or(0);
         let scanline_config = ScanlineCodecConfig::new(config.width, config.height);
         let dct_config = DctCodecConfig::new(config.width, config.height);
+        let wavelet_config = WaveletCodecConfig::new(config.width, config.height);
         let (codec, scanline_codec) = match backend {
             MoshEngineBackend::RawMoshV1 => (Some(MoshCodec::new(config)?), None),
             MoshEngineBackend::ScanlineSignalV1 => {
                 (None, Some(ScanlineCodec::new(scanline_config)?))
             }
-            MoshEngineBackend::DctTransformV1 => (None, None),
+            MoshEngineBackend::DctTransformV1 | MoshEngineBackend::WaveletPyramidV1 => (None, None),
         };
         let dct_codec = match backend {
             MoshEngineBackend::DctTransformV1 => Some(DctCodec::new(dct_config)?),
+            _ => None,
+        };
+        let wavelet_codec = match backend {
+            MoshEngineBackend::WaveletPyramidV1 => Some(WaveletCodec::new(wavelet_config)?),
             _ => None,
         };
         Ok(Self {
@@ -439,6 +458,10 @@ impl MoshEngine {
             dct_params: DctGlitchParams::default(),
             dct_bitstream: DctBitstreamParams::default(),
             dct_stats: MoshCodecStats::default(),
+            wavelet_config,
+            wavelet_codec,
+            wavelet_params: WaveletGlitchParams::default(),
+            wavelet_stats: MoshCodecStats::default(),
             controls: RawMoshControls::default(),
             rgb_input: Vec::with_capacity(frame_len),
             rgb_output: Vec::with_capacity(frame_len),
@@ -478,6 +501,14 @@ impl MoshEngine {
         (self.backend == MoshEngineBackend::DctTransformV1).then_some(&self.dct_params)
     }
 
+    pub fn wavelet_config(&self) -> Option<&WaveletCodecConfig> {
+        (self.backend == MoshEngineBackend::WaveletPyramidV1).then_some(&self.wavelet_config)
+    }
+
+    pub fn wavelet_params(&self) -> Option<&WaveletGlitchParams> {
+        (self.backend == MoshEngineBackend::WaveletPyramidV1).then_some(&self.wavelet_params)
+    }
+
     pub fn controls(&self) -> RawMoshControls {
         self.controls
     }
@@ -491,6 +522,7 @@ impl MoshEngine {
                 .unwrap_or(&self.scanline_stats),
             MoshEngineBackend::ScanlineSignalV1 => &self.scanline_stats,
             MoshEngineBackend::DctTransformV1 => &self.dct_stats,
+            MoshEngineBackend::WaveletPyramidV1 => &self.wavelet_stats,
         }
     }
 
@@ -521,6 +553,13 @@ impl MoshEngine {
                 load_dct_transform_preset(name, &mut self.dct_params)?;
                 load_dct_bitstream_preset(name, &mut self.dct_bitstream);
                 if let Some(codec) = &mut self.dct_codec {
+                    codec.reset_glitch_state();
+                }
+                Ok(())
+            }
+            MoshEngineBackend::WaveletPyramidV1 => {
+                load_wavelet_preset(name, &mut self.wavelet_params)?;
+                if let Some(codec) = &mut self.wavelet_codec {
                     codec.reset_glitch_state();
                 }
                 Ok(())
@@ -569,6 +608,43 @@ impl MoshEngine {
                     set_dct_bitstream_parameter(&mut self.dct_bitstream, id, value)?;
                 }
             }
+            MoshEngineBackend::WaveletPyramidV1 => match id {
+                "quality" => {
+                    let quality = if value.is_finite() {
+                        value.round().clamp(1.0, 100.0) as u8
+                    } else {
+                        WaveletCodecConfig::default().quality
+                    };
+                    if quality != self.wavelet_config.quality {
+                        self.wavelet_config.quality = quality;
+                        self.rebuild_codec()?;
+                    }
+                }
+                "levels" => {
+                    let max_levels = self.wavelet_config.max_levels().max(1);
+                    let levels = if value.is_finite() {
+                        value.round().clamp(1.0, max_levels as f32) as usize
+                    } else {
+                        WaveletCodecConfig::default().levels.min(max_levels)
+                    };
+                    if levels != self.wavelet_config.levels {
+                        self.wavelet_config.levels = levels;
+                        self.rebuild_codec()?;
+                    }
+                }
+                "history_len" => {
+                    let history_len = if value.is_finite() {
+                        value.round().clamp(1.0, 128.0) as usize
+                    } else {
+                        WaveletCodecConfig::default().history_len
+                    };
+                    if history_len != self.wavelet_config.history_len {
+                        self.wavelet_config.history_len = history_len;
+                        self.rebuild_codec()?;
+                    }
+                }
+                _ => set_wavelet_parameter(&mut self.wavelet_params, id, value)?,
+            },
         }
         Ok(())
     }
@@ -582,6 +658,9 @@ impl MoshEngine {
             self.scanline_fresh = true;
         }
         if let Some(codec) = &mut self.dct_codec {
+            codec.reset_glitch_state();
+        }
+        if let Some(codec) = &mut self.wavelet_codec {
             codec.reset_glitch_state();
         }
         self.last_bitstream_stats = MoshBitstreamMutationStats::default();
@@ -654,6 +733,16 @@ impl MoshEngine {
                     codec.process_rgb_frame(input, &frame_params, output)?;
                 }
                 self.update_dct_compat_stats();
+                MoshBitstreamMutationStats::default()
+            }
+            MoshEngineBackend::WaveletPyramidV1 => {
+                let mut frame_params = self.wavelet_params;
+                apply_wavelet_controls(&mut frame_params, self.controls);
+                self.wavelet_codec
+                    .as_mut()
+                    .expect("wavelet backend owns wavelet codec")
+                    .process_rgb_frame(input, &frame_params, output)?;
+                self.update_wavelet_compat_stats();
                 MoshBitstreamMutationStats::default()
             }
         };
@@ -771,6 +860,16 @@ impl MoshEngine {
                 self.update_dct_compat_stats();
                 MoshBitstreamMutationStats::default()
             }
+            MoshEngineBackend::WaveletPyramidV1 => {
+                let mut frame_params = self.wavelet_params;
+                apply_wavelet_controls(&mut frame_params, self.controls);
+                self.wavelet_codec
+                    .as_mut()
+                    .expect("wavelet backend owns wavelet codec")
+                    .process_rgb_frame(&self.rgb_input, &frame_params, &mut self.rgb_output)?;
+                self.update_wavelet_compat_stats();
+                MoshBitstreamMutationStats::default()
+            }
         };
         self.last_bitstream_stats = stats;
         Ok(stats)
@@ -798,6 +897,11 @@ impl MoshEngine {
                 self.dct_codec =
                     Some(DctCodec::new(self.dct_config).map_err(|error| error.to_string())?);
             }
+            MoshEngineBackend::WaveletPyramidV1 => {
+                self.wavelet_codec = Some(
+                    WaveletCodec::new(self.wavelet_config).map_err(|error| error.to_string())?,
+                );
+            }
         }
         self.last_bitstream_stats = MoshBitstreamMutationStats::default();
         Ok(())
@@ -821,6 +925,12 @@ impl MoshEngine {
             * self.dct_config.height.div_ceil(2).div_ceil(8);
         self.dct_stats.blocks_encoded += (luma_blocks + 2 * chroma_blocks) as u64;
         self.dct_stats.keyframes += 1;
+    }
+
+    fn update_wavelet_compat_stats(&mut self) {
+        self.wavelet_stats.frames_in += 1;
+        self.wavelet_stats.blocks_encoded += (3 * (1 + self.wavelet_config.levels * 3)) as u64;
+        self.wavelet_stats.keyframes += 1;
     }
 }
 
@@ -1233,6 +1343,8 @@ pub const DATAMOSH_BACKEND_SCANLINE_SIGNAL_V1: u32 = 2;
 
 pub const DATAMOSH_BACKEND_DCT_TRANSFORM_V1: u32 = 3;
 
+pub const DATAMOSH_BACKEND_WAVELET_PYRAMID_V1: u32 = 4;
+
 fn ffi_status(function: impl FnOnce() -> Result<(), i32>) -> i32 {
     match panic::catch_unwind(AssertUnwindSafe(function)) {
         Ok(Ok(())) => DATAMOSH_STATUS_OK,
@@ -1297,7 +1409,7 @@ pub extern "C" fn datamosh_status_message(status: i32) -> *const c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_backend_count() -> usize {
-    3
+    4
 }
 
 #[unsafe(no_mangle)]
@@ -1311,6 +1423,7 @@ pub extern "C" fn datamosh_mosh_engine_backend_name(backend: u32) -> *const c_ch
         Some(MoshEngineBackend::RawMoshV1) => b"raw_mosh_v1\0",
         Some(MoshEngineBackend::ScanlineSignalV1) => b"scanline_signal_v1\0",
         Some(MoshEngineBackend::DctTransformV1) => b"dct_transform_v1\0",
+        Some(MoshEngineBackend::WaveletPyramidV1) => b"wavelet_pyramid_v1\0",
         None => b"unknown\0",
     };
     name.as_ptr().cast()
@@ -2860,7 +2973,7 @@ mod tests {
 
     #[test]
     fn c_abi_mosh_engine_processes_rgb24() {
-        assert_eq!(datamosh_mosh_engine_backend_count(), 3);
+        assert_eq!(datamosh_mosh_engine_backend_count(), 4);
         assert_eq!(
             datamosh_mosh_engine_default_backend(),
             DATAMOSH_BACKEND_RAW_MOSH_V1
@@ -2874,6 +2987,16 @@ mod tests {
             .to_str()
             .unwrap(),
             "scanline_signal_v1"
+        );
+        assert_eq!(
+            unsafe {
+                CStr::from_ptr(datamosh_mosh_engine_backend_name(
+                    DATAMOSH_BACKEND_WAVELET_PYRAMID_V1,
+                ))
+            }
+            .to_str()
+            .unwrap(),
+            "wavelet_pyramid_v1"
         );
 
         let engine = datamosh_mosh_engine_new_with_backend(DATAMOSH_BACKEND_RAW_MOSH_V1, 2, 2);
@@ -3026,6 +3149,37 @@ mod tests {
 
         engine.set_parameter("quality", 0.0).unwrap();
         assert_eq!(engine.dct_config().unwrap().quality, 1);
+    }
+
+    #[test]
+    fn wavelet_backend_processes_presets_and_rebuild_parameters() {
+        let width = 48;
+        let height = 32;
+        let mut engine =
+            MoshEngine::with_backend(MoshEngineBackend::WaveletPyramidV1, width, height).unwrap();
+        assert_eq!(engine.wavelet_config().unwrap().levels, 3);
+        engine.set_preset("hierarchy-collapse").unwrap();
+        engine.set_parameter("quality", 90.0).unwrap();
+        engine.set_parameter("levels", 2.0).unwrap();
+        engine.set_parameter("history_lag", 4.0).unwrap();
+
+        let mut input = vec![0_u8; width * height * RAW_RGB_CHANNELS];
+        let mut output = vec![0_u8; input.len()];
+        for frame in 0..6 {
+            for (index, pixel) in input.chunks_exact_mut(RAW_RGB_CHANNELS).enumerate() {
+                pixel[0] = ((index + frame * 17) & 0xff) as u8;
+                pixel[1] = ((index * 3 + frame * 11) & 0xff) as u8;
+                pixel[2] = ((index * 7 + frame * 5) & 0xff) as u8;
+            }
+            engine.process_rgb24(&input, &mut output).unwrap();
+        }
+
+        assert_ne!(output, input);
+        assert_eq!(engine.wavelet_config().unwrap().quality, 90);
+        assert_eq!(engine.wavelet_config().unwrap().levels, 2);
+        assert_eq!(engine.wavelet_params().unwrap().history_lag, 4);
+        assert_eq!(engine.stats().frames_in, 6);
+        assert_eq!(engine.stats().keyframes, 6);
     }
 
     #[test]

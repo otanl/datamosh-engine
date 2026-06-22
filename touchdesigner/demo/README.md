@@ -12,7 +12,7 @@ A quick-start project that runs the datamosh codec TOPs on a video input in real
 
    This builds `datamosh.dll` plus the TouchDesigner TOP plugins and copies the ones TD needs
    into `touchdesigner/demo/Plugins/`. (You can also copy them by hand from `target/release/`:
-   `datamosh.dll`, `DatamoshTOP.dll`, `ScanlineSignalTOP.dll`, `DatamoshDctTOP.dll`, and — with an
+   `datamosh.dll`, `DatamoshTOP.dll`, `DatamoshScanlineTOP.dll`, `DatamoshDctTOP.dll`, and — with an
    NVIDIA GPU — `DatamoshCudaTOP.dll`, `DatamoshDctCudaTOP.dll`.)
 
 2. Open `datamosh-demo.toe` in TouchDesigner. TouchDesigner loads Custom Operators from the
@@ -28,7 +28,7 @@ one moving source:
 source (Movie File In, media/sample.mp4)
   → xform (slow pan + rotate — injects motion so the motion codec has vectors to chew on)
       → motion1   (DatamoshTOP        · MSH0 · Pattern "melt")
-      → scanline1 (ScanlineSignalTOP  · SCN0 · Pattern "predictor-ghost")
+      → scanline1 (DatamoshScanlineTOP  · SCN0 · Pattern "predictor-ghost")
       → dct1      (DatamoshDctTOP      · DCT0 · Pattern "bleed")
   → grid (Layout TOP, 2×2, with text labels) → out1
 ```

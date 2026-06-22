@@ -17,8 +17,17 @@ try {
 }
 finally { Pop-Location }
 
-$cpuScripts = @('build-td-top.cmd', 'build-td-scanline-top.cmd', 'build-td-dct-top.cmd')
-$cudaScripts = @('build-td-cuda-top.cmd', 'build-td-dct-cuda-top.cmd')
+$cpuScripts = @(
+    'build-td-top.cmd',
+    'build-td-scanline-top.cmd',
+    'build-td-dct-top.cmd',
+    'build-td-wavelet-top.cmd'
+)
+$cudaScripts = @(
+    'build-td-cuda-top.cmd',
+    'build-td-dct-cuda-top.cmd',
+    'build-td-wavelet-cuda-top.cmd'
+)
 $buildScripts = if ($SkipCuda) { $cpuScripts } else { $cpuScripts + $cudaScripts }
 
 foreach ($script in $buildScripts) {
@@ -29,8 +38,20 @@ foreach ($script in $buildScripts) {
 
 # Stage the runtime DLLs TouchDesigner needs into the demo's Plugins folder.
 New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
-$dlls = @('datamosh.dll', 'DatamoshTOP.dll', 'ScanlineSignalTOP.dll', 'DatamoshDctTOP.dll')
-if (-not $SkipCuda) { $dlls += @('DatamoshCudaTOP.dll', 'DatamoshDctCudaTOP.dll') }
+$dlls = @(
+    'datamosh.dll',
+    'DatamoshTOP.dll',
+    'DatamoshScanlineTOP.dll',
+    'DatamoshDctTOP.dll',
+    'DatamoshWaveletTOP.dll'
+)
+if (-not $SkipCuda) {
+    $dlls += @(
+        'DatamoshCudaTOP.dll',
+        'DatamoshDctCudaTOP.dll',
+        'DatamoshWaveletCudaTOP.dll'
+    )
+}
 
 foreach ($dll in $dlls) {
     $src = Join-Path $releaseDir $dll

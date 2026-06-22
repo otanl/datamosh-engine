@@ -397,6 +397,74 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    DatamoshCudaParams overrideParams;
+    overrideParams.pattern = 8;
+    overrideParams.intensity = 1.0f;
+    overrideParams.motion = 1.0f;
+    overrideParams.residual = 1.0f;
+    overrideParams.temporal = 1.0f;
+    overrideParams.bitstream = 1.0f;
+    overrideParams.overrideMask = DATAMOSH_CUDA_OVERRIDE_ALL;
+    overrideParams.mvScale = 1.4f;
+    overrideParams.mvJitter = 3;
+    overrideParams.vectorInterpolation = 0.6f;
+    overrideParams.sampleAddressDesync = 2.0f;
+    overrideParams.referenceLag = 3;
+    overrideParams.referenceBleed = 0.45f;
+    overrideParams.referenceLatchFrames = 4;
+    overrideParams.temporalSliceDrift = 1;
+    overrideParams.residualKeep = 0.35f;
+    overrideParams.residualAddressJitter = 5;
+    overrideParams.residualChannelShift = 1;
+    overrideParams.entropySlipEvery = 3;
+    overrideParams.entropySlipWindows = 4;
+    overrideParams.coeffShift = 1;
+    overrideParams.coeffQuant = 4;
+    overrideParams.codebookReplaceEvery = 5;
+    overrideParams.codebookStride = -3;
+    overrideParams.codebookShuffleEvery = 7;
+    datamoshCudaReset(state);
+    for (int frame = 0; frame < 16; ++frame)
+    {
+        fillFrame(input, width, height, frame + 90);
+        check(cudaMemcpy2DToArrayAsync(
+                  inputArray,
+                  0,
+                  0,
+                  input.data(),
+                  rowBytes,
+                  rowBytes,
+                  height,
+                  cudaMemcpyHostToDevice,
+                  stream),
+              "cudaMemcpy2DToArrayAsync overrides");
+        check(datamoshCudaProcess(
+                  state, inputSurface, outputSurface, overrideParams, stream),
+              "datamoshCudaProcess overrides");
+    }
+    check(cudaMemcpy2DFromArrayAsync(
+              output.data(),
+              rowBytes,
+              outputArray,
+              0,
+              0,
+              rowBytes,
+              height,
+              cudaMemcpyDeviceToHost,
+              stream),
+          "cudaMemcpy2DFromArrayAsync overrides");
+    check(cudaStreamSynchronize(stream), "cudaStreamSynchronize overrides");
+    const uint64_t overrideChecksum = checksum(output);
+    if (overrideChecksum == patternChecksums[8] ||
+        overrideChecksum == checksum(input))
+    {
+        std::fprintf(
+            stderr,
+            "manual overrides did not alter clean decode: %llu\n",
+            static_cast<unsigned long long>(overrideChecksum));
+        return 1;
+    }
+
     params.pattern = 0;
     params.vectorDecode = 4;
     params.intensity = 1.4f;

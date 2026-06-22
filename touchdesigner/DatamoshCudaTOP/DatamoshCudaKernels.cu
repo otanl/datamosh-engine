@@ -53,6 +53,23 @@ __device__ __forceinline__ unsigned hashValue(unsigned value)
     return value ^ (value >> 16);
 }
 
+__device__ __forceinline__ bool overrideEnabled(
+    const DatamoshCudaParams& params,
+    uint64_t flag)
+{
+    return (params.overrideMask & flag) != 0;
+}
+
+__device__ __forceinline__ bool eventHit(uint64_t ordinal, int every)
+{
+    return every > 0 && ordinal % static_cast<uint64_t>(every) == 0;
+}
+
+__device__ __forceinline__ short clampShort(int value)
+{
+    return static_cast<short>(max(-32768, min(32767, value)));
+}
+
 __device__ __forceinline__ int luma(uchar4 pixel)
 {
     return (29 * static_cast<int>(pixel.x) + 150 * static_cast<int>(pixel.y) +
@@ -471,6 +488,55 @@ __global__ void decodeFrame(
     if (params.vectorDecode != 0)
         motion = residualMotion;
 
+    const int latchFrames =
+        overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_REFERENCE_LATCH)
+            ? max(1, params.referenceLatchFrames)
+            : 1;
+    const uint64_t latchedFrame =
+        state.frameIndex / static_cast<uint64_t>(latchFrames);
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_VECTOR_INTERP) &&
+        params.vectorInterpolation > 0.0f)
+    {
+        const int rightIndex =
+            blockY * state.blocksX + min(blockX + 1, state.blocksX - 1);
+        const int downIndex =
+            min(blockY + 1, state.blocksY - 1) * state.blocksX + blockX;
+        const short2 right = state.motionVectors[rightIndex];
+        const short2 down = state.motionVectors[downIndex];
+        const float amount = min(1.0f, max(0.0f, params.vectorInterpolation));
+        const float averageX =
+            (static_cast<float>(cleanMotion.x) + right.x + down.x) / 3.0f;
+        const float averageY =
+            (static_cast<float>(cleanMotion.y) + right.y + down.y) / 3.0f;
+        motion.x = clampShort(static_cast<int>(roundf(
+            static_cast<float>(motion.x) * (1.0f - amount) +
+            averageX * amount)));
+        motion.y = clampShort(static_cast<int>(roundf(
+            static_cast<float>(motion.y) * (1.0f - amount) +
+            averageY * amount)));
+    }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_MV_SCALE))
+    {
+        motion.x = clampShort(
+            static_cast<int>(roundf(motion.x * params.mvScale)));
+        motion.y = clampShort(
+            static_cast<int>(roundf(motion.y * params.mvScale)));
+    }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_MV_JITTER) &&
+        params.mvJitter > 0)
+    {
+        const unsigned jitterNoise = hashValue(
+            static_cast<unsigned>(blockIndex * 2654435761U) ^
+            static_cast<unsigned>(latchedFrame) ^ params.seed);
+        const int span = params.mvJitter * 2 + 1;
+        motion.x = clampShort(
+            motion.x + static_cast<int>(jitterNoise % span) - params.mvJitter);
+        motion.y = clampShort(
+            motion.y +
+            static_cast<int>((jitterNoise >> 16) % span) -
+            params.mvJitter);
+    }
+
     int temporalSpan =
         max(1, min(availableHistory, 1 + static_cast<int>(params.temporal * params.intensity * 4)));
     int referenceLag = 1;
@@ -504,6 +570,18 @@ __global__ void decodeFrame(
             temporalSpan;
         referenceLag = 1 + weaveCell;
     }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_REFERENCE_LAG))
+        referenceLag = max(1, params.referenceLag);
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_TEMPORAL_DRIFT) &&
+        params.temporalSliceDrift != 0)
+    {
+        const int slice = y / max(1, state.blockSize / 2);
+        referenceLag +=
+            (slice + static_cast<int>(latchedFrame)) *
+            params.temporalSliceDrift;
+    }
+    referenceLag =
+        1 + wrapIndex(referenceLag - 1, max(1, availableHistory));
 
     int dirtySlot =
         historySlot(state.frameIndex, availableHistory, referenceLag, state.historySlots);
@@ -719,6 +797,110 @@ __global__ void decodeFrame(
         }
     }
 
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_RESIDUAL_JITTER) &&
+        params.residualAddressJitter > 0)
+    {
+        const unsigned jitterNoise = hashValue(
+            noise ^ static_cast<unsigned>(latchedFrame * 2246822519ULL));
+        const int radius = params.residualAddressJitter;
+        const int span = radius * 2 + 1;
+        residualPixel = pixelIndex2D(
+            x + static_cast<int>(jitterNoise % span) - radius,
+            y + static_cast<int>((jitterNoise >> 16) % span) - radius,
+            state.width,
+            state.height);
+        residual = state.residual[residualPixel];
+    }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_ENTROPY_EVERY) &&
+        eventHit(
+            static_cast<uint64_t>(blockIndex) + latchedFrame,
+            params.entropySlipEvery))
+    {
+        const int windows = max(1, params.entropySlipWindows);
+        const int window = (x / max(1, state.blockSize / 2) + blockY) % windows;
+        const int slip = (window + 1) * ((noise & 1U) ? 1 : -1);
+        residual.x = readByteSlippedResidual(
+            state.residual,
+            state.width * state.height,
+            residualPixel,
+            0,
+            slip);
+        residual.y = readByteSlippedResidual(
+            state.residual,
+            state.width * state.height,
+            residualPixel,
+            1,
+            -slip);
+        residual.z = readByteSlippedResidual(
+            state.residual,
+            state.width * state.height,
+            residualPixel,
+            2,
+            slip + window);
+    }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_CODEBOOK_EVERY) &&
+        eventHit(
+            static_cast<uint64_t>(blockIndex) + latchedFrame,
+            params.codebookReplaceEvery))
+    {
+        int stride = params.codebookStride;
+        if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_CODEBOOK_SHUFFLE) &&
+            eventHit(
+                static_cast<uint64_t>(blockIndex) + latchedFrame,
+                params.codebookShuffleEvery))
+        {
+            stride = static_cast<int>((noise >> 8) % max(1, state.blocksX)) -
+                     state.blocksX / 2;
+        }
+        const int sourceBlockX = wrapCoord(blockX + stride, state.blocksX);
+        const int sourceBlockY =
+            wrapCoord(blockY + stride / max(1, state.blocksX), state.blocksY);
+        const int sourcePixel = pixelIndex2D(
+            sourceBlockX * state.blockSize + x % state.blockSize,
+            sourceBlockY * state.blockSize + y % state.blockSize,
+            state.width,
+            state.height);
+        const int slot = historySlot(
+            state.frameIndex,
+            availableHistory,
+            max(1, params.referenceLag),
+            state.historySlots);
+        residual =
+            state.residualHistory[slot * state.width * state.height + sourcePixel];
+    }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_COEFF_SHIFT) &&
+        params.coeffShift != 0)
+    {
+        const int shift = wrapIndex(params.coeffShift, 3);
+        const short components[3] = {residual.x, residual.y, residual.z};
+        residual.x = components[wrapIndex(shift, 3)];
+        residual.y = components[wrapIndex(shift + 1, 3)];
+        residual.z = components[wrapIndex(shift + 2, 3)];
+    }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_COEFF_QUANT) &&
+        params.coeffQuant > 1)
+    {
+        const int quant = params.coeffQuant;
+        residual.x = clampShort(
+            static_cast<int>(roundf(static_cast<float>(residual.x) / quant)) *
+            quant);
+        residual.y = clampShort(
+            static_cast<int>(roundf(static_cast<float>(residual.y) / quant)) *
+            quant);
+        residual.z = clampShort(
+            static_cast<int>(roundf(static_cast<float>(residual.z) / quant)) *
+            quant);
+    }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_RESIDUAL_CHANNEL) &&
+        params.residualChannelShift != 0)
+    {
+        const int shift = wrapIndex(params.residualChannelShift, 3);
+        const short components[3] = {residual.x, residual.y, residual.z};
+        residual.x = components[wrapIndex(shift, 3)];
+        residual.y = components[wrapIndex(shift + 1, 3)];
+        residual.z = components[wrapIndex(shift + 2, 3)];
+    }
+
     float residualKeep = 1.0f;
     if (corrupt)
     {
@@ -733,14 +915,34 @@ __global__ void decodeFrame(
         else if (params.pattern == 12)
             residualKeep = 0.12f;
     }
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_RESIDUAL_KEEP))
+        residualKeep = max(-2.0f, min(2.0f, params.residualKeep));
 
     uchar4 current =
         readInput(input, x, y, state.width, state.height, params.inputFormat);
+    int sampleOffsetX = 0;
+    int sampleOffsetY = 0;
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_SAMPLE_DESYNC) &&
+        params.sampleAddressDesync > 0.0f)
+    {
+        const int radius =
+            max(0, static_cast<int>(roundf(params.sampleAddressDesync)));
+        if (radius > 0)
+        {
+            const unsigned sampleNoise = hashValue(
+                noise ^ static_cast<unsigned>(latchedFrame * 3266489917ULL));
+            const int span = radius * 2 + 1;
+            sampleOffsetX =
+                static_cast<int>(sampleNoise % span) - radius;
+            sampleOffsetY =
+                static_cast<int>((sampleNoise >> 16) % span) - radius;
+        }
+    }
     uchar4 dirtyPrediction = readHistory(
         state.dirtyHistory,
         dirtySlot,
-        x + motion.x,
-        y + motion.y,
+        x + motion.x + sampleOffsetX,
+        y + motion.y + sampleOffsetY,
         state.width,
         state.height);
     short2 baseMotion = residualMotion;
@@ -759,8 +961,8 @@ __global__ void decodeFrame(
     uchar4 cleanPrediction = readHistory(
         state.cleanHistory,
         historySlot(state.frameIndex, availableHistory, 1, state.historySlots),
-        x + baseMotion.x,
-        y + baseMotion.y,
+        x + baseMotion.x + sampleOffsetX,
+        y + baseMotion.y + sampleOffsetY,
         state.width,
         state.height);
     bool recursivePrediction =
@@ -769,6 +971,23 @@ __global__ void decodeFrame(
         (params.pattern == 11 && packetLost);
     uchar4 prediction =
         corrupt && recursivePrediction ? dirtyPrediction : cleanPrediction;
+    if (overrideEnabled(params, DATAMOSH_CUDA_OVERRIDE_REFERENCE_BLEED) &&
+        params.referenceBleed > 0.0f)
+    {
+        const float bleed =
+            min(1.0f, max(0.0f, params.referenceBleed));
+        prediction = make_uchar4(
+            static_cast<unsigned char>(roundf(
+                cleanPrediction.x * (1.0f - bleed) +
+                dirtyPrediction.x * bleed)),
+            static_cast<unsigned char>(roundf(
+                cleanPrediction.y * (1.0f - bleed) +
+                dirtyPrediction.y * bleed)),
+            static_cast<unsigned char>(roundf(
+                cleanPrediction.z * (1.0f - bleed) +
+                dirtyPrediction.z * bleed)),
+            current.w);
+    }
 
     int values[3] = {
         static_cast<int>(prediction.x) + static_cast<int>(residual.x * residualKeep),

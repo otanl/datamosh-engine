@@ -28,6 +28,7 @@ public:
 
 private:
     bool ensureState(int width, int height);
+    void applyAudioControlInputs(const OP_Inputs* inputs);
     void releaseState();
     void setCudaError(const char* operation, cudaError_t error);
 
@@ -39,12 +40,25 @@ private:
     cudaSurfaceObject_t myOutputSurface = 0;
     int myWidth = 0;
     int myHeight = 0;
+    int myQuality = 50;
     uint64_t myExecuteCount = 0;
     uint64_t myProcessedFrames = 0;
     int64_t myInputCooks = 0;
     int32_t myCookStage = 0;
     int32_t myInputFormat = -1;
     bool myResetPending = true;
+    bool myUseParams = false;
+    bool myLastUseParams = false;
+    bool myAudioActive = false;
+    bool myAudioResetArmed = true;
+    float myAudioResetValue = 0.0f;
+    float myIntensity = 1.0f;
+    float myStructure = 1.0f;
+    float myPersist = 1.0f;
+    float myDc = 1.0f;
+    float myQuant = 1.0f;
+    std::string myParameterId;
+    std::string myLastParameterId;
     std::string myPatternName = "clean";
     int32_t myPatternIndex = 0;
     int32_t myLastPatternIndex = -1;
