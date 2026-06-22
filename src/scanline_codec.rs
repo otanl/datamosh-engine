@@ -829,11 +829,9 @@ fn decode_line_into(
         if group_index != 0 {
             let delta = luma_residual.get(group_index - 1).copied().unwrap_or(0);
             if ((sequence_phase as usize + group_index) & 1) == 0 {
-                carrier_a =
-                    (carrier_a as i16 + delta as i16 * chroma_quant).clamp(-128, 127) as i8;
+                carrier_a = (carrier_a as i16 + delta as i16 * chroma_quant).clamp(-128, 127) as i8;
             } else {
-                carrier_b =
-                    (carrier_b as i16 + delta as i16 * chroma_quant).clamp(-128, 127) as i8;
+                carrier_b = (carrier_b as i16 + delta as i16 * chroma_quant).clamp(-128, 127) as i8;
             }
         }
         let (cb, cr) = inverse_rotate_chroma(carrier_a, carrier_b, sequence_phase);

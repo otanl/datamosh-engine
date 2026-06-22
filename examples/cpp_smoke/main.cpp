@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
         load_symbol<process_rgba8_fn>(dll, "datamosh_mosh_engine_process_rgba8");
 
     const uint32_t backend = default_backend();
-    if (backend_count() < 2 || backend != DATAMOSH_BACKEND_RAW_MOSH_V1) {
+    if (backend_count() < 3 || backend != DATAMOSH_BACKEND_RAW_MOSH_V1) {
         std::cerr << "unexpected backend table\n";
         return 3;
     }
@@ -144,8 +144,29 @@ int main(int argc, char** argv) {
         }
     }
 
+    const std::string scanline_backend_name = backend_name(engine_backend(engine));
+    engine_free(engine);
+
+    engine = engine_new(DATAMOSH_BACKEND_DCT_TRANSFORM_V1, width, height);
+    if (!engine) {
+        std::cerr << "failed to create DCT engine\n";
+        return 3;
+    }
+    check(set_preset(engine, "desync"), "DCT set_preset");
+    check(set_controls(engine, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f),
+          "DCT set_controls");
+    check(process_rgba8(engine, input.data(), input.size(), output.data(), output.size()),
+          "DCT process_rgba8");
+    for (size_t i = 0; i < width * height; ++i) {
+        if (output[i * 4 + 3] != input[i * 4 + 3]) {
+            std::cerr << "DCT alpha channel was not preserved\n";
+            engine_free(engine);
+            return 5;
+        }
+    }
+
     std::cout << "cpp smoke ok: backends " << raw_backend_name << ", "
-              << backend_name(engine_backend(engine)) << "\n";
+              << scanline_backend_name << ", " << backend_name(engine_backend(engine)) << "\n";
     engine_free(engine);
     FreeLibrary(dll);
     return 0;

@@ -22,7 +22,6 @@ pub enum Codec {
     Mpeg2,
 }
 
-
 impl Codec {
     pub fn parse(value: &str) -> Result<Self, String> {
         match value {
@@ -48,14 +47,12 @@ impl Codec {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum MpegSliceDropMode {
     All,
     Key,
     Predicted,
 }
-
 
 impl MpegSliceDropMode {
     pub fn parse(value: &str) -> Result<Self, String> {
@@ -78,7 +75,6 @@ impl MpegSliceDropMode {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum FrameTypeRewrite {
     I,
@@ -87,7 +83,6 @@ pub enum FrameTypeRewrite {
     S,
     D,
 }
-
 
 impl FrameTypeRewrite {
     pub fn parse(value: &str) -> Result<Self, String> {
@@ -113,7 +108,6 @@ impl FrameTypeRewrite {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -158,7 +152,6 @@ pub struct Config {
     pub drop_headers_after_first: bool,
     pub quiet: bool,
 }
-
 
 impl Default for Config {
     fn default() -> Self {
@@ -207,7 +200,6 @@ impl Default for Config {
     }
 }
 
-
 #[derive(Debug, Default)]
 pub struct Stats {
     pub nals_in: u64,
@@ -242,13 +234,11 @@ pub struct Stats {
     pub bytes_out: u64,
 }
 
-
 #[derive(Clone)]
 struct LastPredictedUnit {
     data: Vec<u8>,
     payload_start: usize,
 }
-
 
 pub struct MoshFilter {
     config: Config,
@@ -266,7 +256,6 @@ pub struct MoshFilter {
     last_predicted_unit: Option<LastPredictedUnit>,
     donor_units: VecDeque<LastPredictedUnit>,
 }
-
 
 impl MoshFilter {
     pub fn new(config: Config) -> Self {
@@ -825,15 +814,15 @@ impl MoshFilter {
                     self.config.scramble_amount,
                 );
             }
-            if should_rotate {
-                if rotate_payload(
+            if should_rotate
+                && rotate_payload(
                     &mut edited,
                     edited_payload_start,
                     seed,
                     self.config.rotate_amount,
-                ) {
-                    self.stats.slices_rotated += 1;
-                }
+                )
+            {
+                self.stats.slices_rotated += 1;
             }
             if should_grow {
                 if let Some((previous_data, previous_payload_start)) = &previous {
@@ -863,14 +852,14 @@ impl MoshFilter {
                     }
                 }
             }
-            if should_truncate {
-                if truncate_payload(
+            if should_truncate
+                && truncate_payload(
                     &mut edited,
                     edited_payload_start,
                     self.config.truncate_amount,
-                ) {
-                    self.stats.slices_truncated += 1;
-                }
+                )
+            {
+                self.stats.slices_truncated += 1;
             }
         }
 
@@ -976,13 +965,11 @@ impl MoshFilter {
     }
 }
 
-
 pub struct DatamoshStream {
     filter: MoshFilter,
     buffer: Vec<u8>,
     donor_buffer: Vec<u8>,
 }
-
 
 impl DatamoshStream {
     pub fn new(config: Config) -> Self {
@@ -1032,7 +1019,6 @@ impl DatamoshStream {
     }
 }
 
-
 pub fn run_stream(
     config: Config,
     mut input: impl Read,
@@ -1042,7 +1028,6 @@ pub fn run_stream(
     let mut stream = DatamoshStream::new(config);
     run_stream_inner(&mut stream, &mut input, &mut output, &mut err)
 }
-
 
 pub fn load_donor_stream(stream: &mut DatamoshStream, mut input: impl Read) -> io::Result<()> {
     let mut chunk = [0_u8; READ_CHUNK_SIZE];
@@ -1058,7 +1043,6 @@ pub fn load_donor_stream(stream: &mut DatamoshStream, mut input: impl Read) -> i
 
     stream.finish_donor()
 }
-
 
 pub fn run_stream_inner(
     stream: &mut DatamoshStream,
@@ -1089,7 +1073,6 @@ pub fn run_stream_inner(
     Ok(())
 }
 
-
 fn drain_complete_nals(
     buffer: &mut Vec<u8>,
     filter: &mut MoshFilter,
@@ -1117,7 +1100,6 @@ fn drain_complete_nals(
     }
 }
 
-
 fn drain_complete_donor_nals(buffer: &mut Vec<u8>, filter: &mut MoshFilter) -> io::Result<()> {
     loop {
         let Some((first_start, _)) = find_start_code(buffer, 0) else {
@@ -1141,7 +1123,6 @@ fn drain_complete_donor_nals(buffer: &mut Vec<u8>, filter: &mut MoshFilter) -> i
     }
 }
 
-
 fn drain_remaining_nal(
     buffer: &mut Vec<u8>,
     filter: &mut MoshFilter,
@@ -1164,7 +1145,6 @@ fn drain_remaining_nal(
     Ok(())
 }
 
-
 fn drain_remaining_donor_nal(buffer: &mut Vec<u8>, filter: &mut MoshFilter) -> io::Result<()> {
     let Some((first_start, _)) = find_start_code(buffer, 0) else {
         buffer.clear();
@@ -1183,7 +1163,6 @@ fn drain_remaining_donor_nal(buffer: &mut Vec<u8>, filter: &mut MoshFilter) -> i
     Ok(())
 }
 
-
 fn trim_prefixless_buffer(buffer: &mut Vec<u8>) {
     if buffer.len() <= MAX_PREFIXLESS_BUFFER {
         return;
@@ -1194,11 +1173,9 @@ fn trim_prefixless_buffer(buffer: &mut Vec<u8>) {
     buffer.drain(..drain_to);
 }
 
-
 fn is_every(interval: u64, count: u64) -> bool {
     interval != 0 && count % interval == 0
 }
-
 
 fn damage_payload(unit: &mut [u8], payload_start: usize, seed: u64, amount: usize) {
     if amount == 0 || payload_start >= unit.len() {
@@ -1221,7 +1198,6 @@ fn damage_payload(unit: &mut [u8], payload_start: usize, seed: u64, amount: usiz
         }
     }
 }
-
 
 fn scramble_payload(unit: &mut [u8], payload_start: usize, seed: u64, amount: usize) {
     if amount < 2 || payload_start + 1 >= unit.len() {
@@ -1248,7 +1224,6 @@ fn scramble_payload(unit: &mut [u8], payload_start: usize, seed: u64, amount: us
     }
 }
 
-
 fn rotate_payload(unit: &mut [u8], payload_start: usize, seed: u64, amount: usize) -> bool {
     if amount < 2 || payload_start + 1 >= unit.len() {
         return false;
@@ -1266,7 +1241,6 @@ fn rotate_payload(unit: &mut [u8], payload_start: usize, seed: u64, amount: usiz
     unit[start..start + active_len].rotate_right(rotate_by);
     true
 }
-
 
 fn splice_payload(
     unit: &mut [u8],
@@ -1295,7 +1269,6 @@ fn splice_payload(
     true
 }
 
-
 fn grow_payload(
     unit: &mut Vec<u8>,
     payload_start: usize,
@@ -1323,7 +1296,6 @@ fn grow_payload(
     true
 }
 
-
 fn truncate_payload(unit: &mut Vec<u8>, payload_start: usize, amount: usize) -> bool {
     if amount == 0 || payload_start >= unit.len() {
         return false;
@@ -1339,7 +1311,6 @@ fn truncate_payload(unit: &mut Vec<u8>, payload_start: usize, amount: usize) -> 
     unit.truncate(new_len);
     true
 }
-
 
 fn xor_payload(
     unit: &mut [u8],
@@ -1371,18 +1342,15 @@ fn xor_payload(
     true
 }
 
-
 fn nal_unit_type(nal: &[u8]) -> Option<u8> {
     let prefix_len = prefix_len_at(nal, 0)?;
     nal.get(prefix_len).map(|byte| byte & 0x1f)
 }
 
-
 fn hevc_nal_unit_type(nal: &[u8]) -> Option<u8> {
     let prefix_len = prefix_len_at(nal, 0)?;
     nal.get(prefix_len).map(|byte| (byte >> 1) & 0x3f)
 }
-
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum Mpeg4VopType {
@@ -1392,12 +1360,10 @@ enum Mpeg4VopType {
     S,
 }
 
-
 fn mpeg4_start_code(unit: &[u8]) -> Option<u8> {
     let prefix_len = prefix_len_at(unit, 0)?;
     unit.get(prefix_len).copied()
 }
-
 
 fn mpeg4_vop_type(unit: &[u8]) -> Option<Mpeg4VopType> {
     if mpeg4_start_code(unit)? != 0xb6 {
@@ -1414,7 +1380,6 @@ fn mpeg4_vop_type(unit: &[u8]) -> Option<Mpeg4VopType> {
         _ => None,
     }
 }
-
 
 fn rewrite_mpeg4_vop_type(unit: &mut [u8], target: FrameTypeRewrite) -> bool {
     if mpeg4_start_code(unit) != Some(0xb6) {
@@ -1438,11 +1403,9 @@ fn rewrite_mpeg4_vop_type(unit: &mut [u8], target: FrameTypeRewrite) -> bool {
     true
 }
 
-
 fn is_mpeg4_header_code(code: u8) -> bool {
     matches!(code, 0xb0 | 0xb2 | 0xb3 | 0xb5) || (0x20..=0x2f).contains(&code)
 }
-
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum Mpeg2PictureType {
@@ -1452,12 +1415,10 @@ enum Mpeg2PictureType {
     D,
 }
 
-
 fn mpeg_start_code(unit: &[u8]) -> Option<u8> {
     let prefix_len = prefix_len_at(unit, 0)?;
     unit.get(prefix_len).copied()
 }
-
 
 fn shift_mpeg_slice_address(unit: &mut [u8], offset: i16) -> bool {
     let Some(prefix_len) = prefix_len_at(unit, 0) else {
@@ -1475,7 +1436,6 @@ fn shift_mpeg_slice_address(unit: &mut [u8], offset: i16) -> bool {
     *code = shifted as u8;
     true
 }
-
 
 fn rewrite_mpeg2_picture_type(unit: &mut [u8], target: FrameTypeRewrite) -> bool {
     if mpeg_start_code(unit) != Some(0x00) {
@@ -1499,7 +1459,6 @@ fn rewrite_mpeg2_picture_type(unit: &mut [u8], target: FrameTypeRewrite) -> bool
     true
 }
 
-
 fn mpeg2_picture_type(unit: &[u8]) -> Option<Mpeg2PictureType> {
     if mpeg_start_code(unit)? != 0x00 {
         return None;
@@ -1516,11 +1475,9 @@ fn mpeg2_picture_type(unit: &[u8]) -> Option<Mpeg2PictureType> {
     }
 }
 
-
 fn is_mpeg2_header_code(code: u8) -> bool {
     matches!(code, 0xb2 | 0xb3 | 0xb7 | 0xb8)
 }
-
 
 fn prefix_len_at(bytes: &[u8], at: usize) -> Option<usize> {
     if at + 4 <= bytes.len()
@@ -1539,7 +1496,6 @@ fn prefix_len_at(bytes: &[u8], at: usize) -> Option<usize> {
     None
 }
 
-
 fn find_start_code(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
     let mut i = from;
     while i + 3 <= bytes.len() {
@@ -1550,7 +1506,6 @@ fn find_start_code(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
     }
     None
 }
-
 
 #[cfg(test)]
 mod tests {

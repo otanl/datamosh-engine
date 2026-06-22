@@ -30,9 +30,9 @@ const PARALLEL_FRAME_PIXELS: usize = 200_000;
 
 // Standard JPEG quantization tables (natural row-major order).
 const QUANT_LUMA: [u16; BLOCK_AREA] = [
-    16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69,
-    56, 14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104,
-    113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99,
+    16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56,
+    14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113,
+    92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99,
 ];
 const QUANT_CHROMA: [u16; BLOCK_AREA] = [
     17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99,
@@ -340,7 +340,9 @@ impl DctCodec {
                 .iter()
                 .zip(&self.feedback)
                 .map(|(&live, &fed)| {
-                    (live as f32 * inv + fed as f32 * persistence).round().clamp(0.0, 255.0) as u8
+                    (live as f32 * inv + fed as f32 * persistence)
+                        .round()
+                        .clamp(0.0, 255.0) as u8
                 })
                 .collect::<Vec<u8>>();
             &blended
@@ -444,18 +446,48 @@ impl DctCodec {
         // Luma (channel 0) on the full-res grid, then Cb (1) and Cr (2) on the half-res grid.
         glitch_plane(
             &mut self.coeff[0..lb],
-            if remap_active { &snapshot[0..lb] } else { empty },
-            lbx, lby, 0, params, quant_scale, remap_active, &mut stats,
+            if remap_active {
+                &snapshot[0..lb]
+            } else {
+                empty
+            },
+            lbx,
+            lby,
+            0,
+            params,
+            quant_scale,
+            remap_active,
+            &mut stats,
         );
         glitch_plane(
             &mut self.coeff[lb..lb + cb],
-            if remap_active { &snapshot[lb..lb + cb] } else { empty },
-            cbx, cby, 1, params, quant_scale, remap_active, &mut stats,
+            if remap_active {
+                &snapshot[lb..lb + cb]
+            } else {
+                empty
+            },
+            cbx,
+            cby,
+            1,
+            params,
+            quant_scale,
+            remap_active,
+            &mut stats,
         );
         glitch_plane(
             &mut self.coeff[lb + cb..lb + 2 * cb],
-            if remap_active { &snapshot[lb + cb..lb + 2 * cb] } else { empty },
-            cbx, cby, 2, params, quant_scale, remap_active, &mut stats,
+            if remap_active {
+                &snapshot[lb + cb..lb + 2 * cb]
+            } else {
+                empty
+            },
+            cbx,
+            cby,
+            2,
+            params,
+            quant_scale,
+            remap_active,
+            &mut stats,
         );
 
         // False-colour: swap Cb and Cr coefficient blocks on triggered chroma blocks.
@@ -495,9 +527,33 @@ impl DctCodec {
         let lbx = self.blocks_x;
         let cbx = self.cblocks_x;
         let mut decode_all = || {
-            decode_plane(&coeff[0..lb], lbx, width, height, ql, &mut y_plane, parallel);
-            decode_plane(&coeff[lb..lb + cb], cbx, cw, ch, qc, &mut cb_plane, parallel);
-            decode_plane(&coeff[lb + cb..lb + 2 * cb], cbx, cw, ch, qc, &mut cr_plane, parallel);
+            decode_plane(
+                &coeff[0..lb],
+                lbx,
+                width,
+                height,
+                ql,
+                &mut y_plane,
+                parallel,
+            );
+            decode_plane(
+                &coeff[lb..lb + cb],
+                cbx,
+                cw,
+                ch,
+                qc,
+                &mut cb_plane,
+                parallel,
+            );
+            decode_plane(
+                &coeff[lb + cb..lb + 2 * cb],
+                cbx,
+                cw,
+                ch,
+                qc,
+                &mut cr_plane,
+                parallel,
+            );
         };
         if parallel {
             codec_thread_pool().unwrap().install(decode_all);
@@ -641,7 +697,8 @@ fn inverse_dct(freq: &[f32; BLOCK_AREA]) -> [f32; BLOCK_AREA] {
 // (dct_matrix), so the fast transform is correct by construction (and checked against the
 // matmul by the fast_dct_matches_matmul test) while doing ~half the multiplies.
 fn even_odd_matrices() -> &'static ([[f32; 4]; 4], [[f32; 4]; 4]) {
-    static M: OnceLock<([[f32; 4]; 4], [[f32; 4]; 4])> = OnceLock::new();
+    type EvenOddMatrices = ([[f32; 4]; 4], [[f32; 4]; 4]);
+    static M: OnceLock<EvenOddMatrices> = OnceLock::new();
     M.get_or_init(|| {
         let mut even = [[0.0_f32; 4]; 4];
         let mut odd = [[0.0_f32; 4]; 4];
@@ -876,8 +933,7 @@ fn glitch_plane(
             if block_transpose {
                 transpose_block(block);
             }
-            for zz in 0..BLOCK_AREA {
-                let idx = ZIGZAG[zz];
+            for (zz, &idx) in ZIGZAG.iter().enumerate() {
                 if zz != 0 && low_pass && zz > params.ac_zero_above {
                     block[idx] = 0;
                     continue;
@@ -1153,17 +1209,30 @@ pub fn apply_dct_transform_controls(params: &mut DctGlitchParams, controls: RawM
     let structure = amount(controls.motion); // "Structure"
     params.quant_scale = (1.0 + (params.quant_scale - 1.0) * quant).max(1.0);
     params.dc_drift = scale_i16(params.dc_drift, dc);
+    params.dc_drift_every = scale_event_interval(params.dc_drift_every, dc);
     params.dc_block_offset = scale_i16(params.dc_block_offset, dc);
+    params.dc_block_offset_every = scale_event_interval(params.dc_block_offset_every, dc);
+    params.ac_zero_above = scale_ac_cutoff(params.ac_zero_above, quant);
+    params.coeff_sign_flip_every = scale_event_interval(params.coeff_sign_flip_every, structure);
     params.coeff_shift = scale_i16(params.coeff_shift, structure);
+    params.coeff_shift_every = scale_event_interval(params.coeff_shift_every, structure);
     params.block_shift_x = scale_i16(params.block_shift_x, structure);
     params.block_shift_y = scale_i16(params.block_shift_y, structure);
-    // "Persist" macro (residual slot) scales temporal feedback independently of the master.
+    params.block_shift_every = scale_event_interval(params.block_shift_every, structure);
+    params.block_repeat_every = scale_event_interval(params.block_repeat_every, structure);
+    params.zigzag_reverse_every = scale_event_interval(params.zigzag_reverse_every, structure);
+    params.block_transpose_every = scale_event_interval(params.block_transpose_every, structure);
+    params.chroma_swap_every = scale_event_interval(params.chroma_swap_every, structure);
     params.persistence =
-        (params.persistence * finite_control(controls.residual)).clamp(0.0, 0.98);
+        (params.persistence * master * finite_control(controls.residual)).clamp(0.0, 0.98);
 }
 
 fn finite_control(value: f32) -> f32 {
-    if value.is_finite() { value.max(0.0) } else { 0.0 }
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
 }
 
 pub fn set_dct_transform_parameter(
@@ -1201,6 +1270,23 @@ fn scale_i16(value: i16, amount: f32) -> i16 {
     (value as f32 * amount)
         .round()
         .clamp(i16::MIN as f32, i16::MAX as f32) as i16
+}
+
+fn scale_event_interval(interval: u64, amount: f32) -> u64 {
+    if interval == 0 || amount <= 0.0 {
+        return 0;
+    }
+    (interval as f32 / amount).round().max(1.0) as u64
+}
+
+fn scale_ac_cutoff(cutoff: usize, amount: f32) -> usize {
+    if cutoff == 0 || amount <= 0.0 {
+        return 0;
+    }
+    let clean = (BLOCK_AREA - 1) as f32;
+    (clean + (cutoff as f32 - clean) * amount)
+        .round()
+        .clamp(1.0, clean) as usize
 }
 
 #[cfg(test)]
@@ -1255,8 +1341,14 @@ mod tests {
                 max_inv = max_inv.max((i_fast[k] - i_mat[k]).abs());
             }
         }
-        assert!(max_fwd < 1e-2, "forward fast vs matmul diff too large: {max_fwd}");
-        assert!(max_inv < 1e-2, "inverse fast vs matmul diff too large: {max_inv}");
+        assert!(
+            max_fwd < 1e-2,
+            "forward fast vs matmul diff too large: {max_fwd}"
+        );
+        assert!(
+            max_inv < 1e-2,
+            "inverse fast vs matmul diff too large: {max_inv}"
+        );
     }
 
     #[test]
@@ -1330,34 +1422,90 @@ mod tests {
     fn clean_bitstream_path_matches_normal_path() {
         // The entropy stage is lossless: with no corruption the DTE0 path must reproduce the
         // exact frame the coefficient path produces.
-        let config = DctCodecConfig { width: 80, height: 48, quality: 70 };
+        let config = DctCodecConfig {
+            width: 80,
+            height: 48,
+            quality: 70,
+        };
         let input = gradient(80, 48);
         let params = DctGlitchParams::default();
         let bs = DctBitstreamParams::default();
         let mut a = DctCodec::new(config).unwrap();
         let mut out_normal = vec![0u8; input.len()];
-        a.process_rgb_frame(&input, &params, &mut out_normal).unwrap();
+        a.process_rgb_frame(&input, &params, &mut out_normal)
+            .unwrap();
         let mut b = DctCodec::new(config).unwrap();
         let mut out_bits = vec![0u8; input.len()];
-        b.process_rgb_frame_bitstream(&input, &params, &bs, &mut out_bits).unwrap();
-        assert_eq!(out_normal, out_bits, "clean entropy path must equal the normal clean path");
+        b.process_rgb_frame_bitstream(&input, &params, &bs, &mut out_bits)
+            .unwrap();
+        assert_eq!(
+            out_normal, out_bits,
+            "clean entropy path must equal the normal clean path"
+        );
+    }
+
+    #[test]
+    fn intensity_zero_disables_every_transform_mutation() {
+        let presets = [
+            "blocks",
+            "dc-smear",
+            "bleed",
+            "blur",
+            "ring",
+            "scramble",
+            "block-slip",
+            "echo",
+            "flow",
+            "false-color",
+            "composite",
+        ];
+
+        for preset in presets {
+            let mut params = DctGlitchParams::default();
+            load_dct_transform_preset(preset, &mut params).unwrap();
+            apply_dct_transform_controls(
+                &mut params,
+                RawMoshControls {
+                    intensity: 0.0,
+                    ..RawMoshControls::default()
+                },
+            );
+            assert!(
+                !params.has_mutations(),
+                "intensity zero left `{preset}` active: {params:?}"
+            );
+        }
     }
 
     #[test]
     fn bitstream_glitch_changes_output_without_panicking() {
-        let config = DctCodecConfig { width: 96, height: 64, quality: 60 };
+        let config = DctCodecConfig {
+            width: 96,
+            height: 64,
+            quality: 60,
+        };
         let input = gradient(96, 64);
         let params = DctGlitchParams::default();
-        let bs = DctBitstreamParams { byte_flip_every: 9, drop_every: 23, ..Default::default() };
+        let bs = DctBitstreamParams {
+            enabled: true,
+            byte_flip_every: 9,
+            drop_every: 23,
+            ..Default::default()
+        };
         let mut clean = DctCodec::new(config).unwrap();
         let mut clean_out = vec![0u8; input.len()];
-        clean.process_rgb_frame(&input, &params, &mut clean_out).unwrap();
+        clean
+            .process_rgb_frame(&input, &params, &mut clean_out)
+            .unwrap();
         let mut codec = DctCodec::new(config).unwrap();
         let mut glitched = vec![0u8; input.len()];
         codec
             .process_rgb_frame_bitstream(&input, &params, &bs, &mut glitched)
             .unwrap();
-        assert_ne!(clean_out, glitched, "entropy corruption should change the frame");
+        assert_ne!(
+            clean_out, glitched,
+            "entropy corruption should change the frame"
+        );
     }
 
     #[test]
@@ -1419,7 +1567,10 @@ mod tests {
                 .process_rgb_frame(&input, &params, &mut glitched)
                 .unwrap();
             assert!(params.has_mutations());
-            assert_ne!(clean, glitched, "glitch produced identical output: {params:?}");
+            assert_ne!(
+                clean, glitched,
+                "glitch produced identical output: {params:?}"
+            );
         }
     }
 }

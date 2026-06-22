@@ -38,6 +38,8 @@ motion CUDA TOP's `Datamoshcuda` and the CPU DCT TOP's `Datamoshdct`).
 - `Quality` (1..100) — JPEG-style quantization quality.
 - `Reset Glitch` — clears the temporal-feedback history.
 
+`Intensity = 0` is a codec-clean bypass of all transform and persistence corruption.
+
 The host (`DatamoshDctCudaTOP.cpp`) resolves the pattern preset + macros into the detailed
 glitch parameters and passes them to the kernels, so the preset table mirrors
 `load_dct_transform_preset`.

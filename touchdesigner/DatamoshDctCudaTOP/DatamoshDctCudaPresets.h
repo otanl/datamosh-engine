@@ -116,6 +116,24 @@ inline int scaleInt(int value, float amount)
     return static_cast<int>(std::lround(static_cast<float>(value) * amount));
 }
 
+inline int scalePeriod(int value, float amount)
+{
+    if (value == 0 || amount <= 0.0f)
+        return 0;
+    return std::max(1, static_cast<int>(std::lround(static_cast<float>(value) / amount)));
+}
+
+inline int scaleAcCutoff(int cutoff, float amount)
+{
+    if (cutoff == 0 || amount <= 0.0f)
+        return 0;
+    constexpr float clean = 63.0f;
+    return std::clamp(
+        static_cast<int>(std::lround(clean + (static_cast<float>(cutoff) - clean) * amount)),
+        1,
+        63);
+}
+
 // Hand-mirrored from apply_dct_transform_controls.
 inline void applyControls(
     DatamoshDctCudaParams& p, float intensity, float structure, float persist, float dc,
@@ -127,11 +145,22 @@ inline void applyControls(
     float structAmt = master * std::max(0.0f, structure);
     p.quantScale = std::max(1.0f, 1.0f + (p.quantScale - 1.0f) * quantAmt);
     p.dcDrift = scaleInt(p.dcDrift, dcAmt);
+    p.dcDriftEvery = scalePeriod(p.dcDriftEvery, dcAmt);
     p.dcBlockOffset = scaleInt(p.dcBlockOffset, dcAmt);
+    p.dcBlockOffsetEvery = scalePeriod(p.dcBlockOffsetEvery, dcAmt);
+    p.acZeroAbove = scaleAcCutoff(p.acZeroAbove, quantAmt);
+    p.signFlipEvery = scalePeriod(p.signFlipEvery, structAmt);
     p.coeffShift = scaleInt(p.coeffShift, structAmt);
+    p.coeffShiftEvery = scalePeriod(p.coeffShiftEvery, structAmt);
     p.blockShiftX = scaleInt(p.blockShiftX, structAmt);
     p.blockShiftY = scaleInt(p.blockShiftY, structAmt);
-    p.persistence = std::clamp(p.persistence * std::max(0.0f, persist), 0.0f, 0.98f);
+    p.blockShiftEvery = scalePeriod(p.blockShiftEvery, structAmt);
+    p.blockRepeatEvery = scalePeriod(p.blockRepeatEvery, structAmt);
+    p.zigzagReverseEvery = scalePeriod(p.zigzagReverseEvery, structAmt);
+    p.blockTransposeEvery = scalePeriod(p.blockTransposeEvery, structAmt);
+    p.chromaSwapEvery = scalePeriod(p.chromaSwapEvery, structAmt);
+    p.persistence =
+        std::clamp(p.persistence * master * std::max(0.0f, persist), 0.0f, 0.98f);
 }
 
 } // namespace dctcuda

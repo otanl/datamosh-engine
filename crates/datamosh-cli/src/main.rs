@@ -73,12 +73,10 @@ pub fn run_cli(args: impl IntoIterator<Item = String>) -> i32 {
     }
 }
 
-
 struct CliArgs {
     config: Config,
     donor_file: Option<String>,
 }
-
 
 #[derive(Debug)]
 struct RawMoshCli {
@@ -92,13 +90,11 @@ struct RawMoshCli {
     quiet: bool,
 }
 
-
 #[derive(Debug, Clone, Copy, Default)]
 struct RawMoshControlUpdate {
     rebuild_codec: bool,
     reset_glitch_state: bool,
 }
-
 
 fn apply_raw_mosh_control_message(
     message: &str,
@@ -192,13 +188,11 @@ fn apply_raw_mosh_control_message(
     Ok(update)
 }
 
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum RawMoshScaleMode {
     Nearest,
     Linear,
 }
-
 
 impl RawMoshScaleMode {
     fn parse(value: &str) -> Result<Self, String> {
@@ -211,7 +205,6 @@ impl RawMoshScaleMode {
         }
     }
 }
-
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Option<CliArgs>, String> {
     let mut args = args.into_iter().peekable();
@@ -649,7 +642,6 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Option<CliArgs>,
 
     Ok(Some(CliArgs { config, donor_file }))
 }
-
 
 fn parse_raw_mosh_args(
     args: impl IntoIterator<Item = String>,
@@ -1731,13 +1723,11 @@ fn parse_raw_mosh_args(
     }))
 }
 
-
 fn parse_u64(name: &str, value: &str) -> Result<u64, String> {
     value
         .parse()
         .map_err(|_| format!("{name} must be a non-negative integer"))
 }
-
 
 fn parse_usize(name: &str, value: &str) -> Result<usize, String> {
     value
@@ -1745,13 +1735,11 @@ fn parse_usize(name: &str, value: &str) -> Result<usize, String> {
         .map_err(|_| format!("{name} must be a non-negative integer"))
 }
 
-
 fn parse_i16(name: &str, value: &str) -> Result<i16, String> {
     value
         .parse()
         .map_err(|_| format!("{name} must be a signed integer"))
 }
-
 
 fn parse_u16(name: &str, value: &str) -> Result<u16, String> {
     value
@@ -1759,13 +1747,11 @@ fn parse_u16(name: &str, value: &str) -> Result<u16, String> {
         .map_err(|_| format!("{name} must be an integer from 0 to 65535"))
 }
 
-
 fn parse_i32(name: &str, value: &str) -> Result<i32, String> {
     value
         .parse()
         .map_err(|_| format!("{name} must be a signed integer"))
 }
-
 
 fn parse_f32(name: &str, value: &str) -> Result<f32, String> {
     let parsed: f32 = value
@@ -1778,13 +1764,11 @@ fn parse_f32(name: &str, value: &str) -> Result<f32, String> {
     }
 }
 
-
 fn parse_u8(name: &str, value: &str) -> Result<u8, String> {
     value
         .parse()
         .map_err(|_| format!("{name} must be an integer from 0 to 255"))
 }
-
 
 fn raw_rgb_frame_len(width: usize, height: usize) -> io::Result<usize> {
     if width == 0 || height == 0 {
@@ -1803,7 +1787,6 @@ fn raw_rgb_frame_len(width: usize, height: usize) -> io::Result<usize> {
             )
         })
 }
-
 
 fn scale_rgb24_frame(
     input: &[u8],
@@ -1849,7 +1832,6 @@ fn scale_rgb24_frame(
     }
 }
 
-
 fn scale_rgb24_frame_nearest(
     input: &[u8],
     input_width: usize,
@@ -1870,7 +1852,6 @@ fn scale_rgb24_frame_nearest(
     }
     Ok(())
 }
-
 
 fn scale_rgb24_frame_linear(
     input: &[u8],
@@ -1911,7 +1892,6 @@ fn scale_rgb24_frame_linear(
     }
     Ok(())
 }
-
 
 fn print_help() {
     println!(
@@ -1984,7 +1964,6 @@ The program reads an H.264 Annex B, MPEG-4 Visual, or MPEG-2 Video elementary st
 "
     );
 }
-
 
 fn print_raw_mosh_help() {
     println!(
@@ -2141,7 +2120,6 @@ Realtime UDP control messages:
     );
 }
 
-
 fn run_cli_stream(
     cli: CliArgs,
     mut input: impl Read,
@@ -2157,7 +2135,6 @@ fn run_cli_stream(
     run_stream_inner(&mut stream, &mut input, &mut output, &mut err)
 }
 
-
 fn bind_raw_mosh_control_socket(port: Option<u16>) -> io::Result<Option<UdpSocket>> {
     let Some(port) = port else {
         return Ok(None);
@@ -2166,7 +2143,6 @@ fn bind_raw_mosh_control_socket(port: Option<u16>) -> io::Result<Option<UdpSocke
     socket.set_nonblocking(true)?;
     Ok(Some(socket))
 }
-
 
 fn drain_raw_mosh_control_socket(
     socket: Option<&UdpSocket>,
@@ -2210,7 +2186,6 @@ fn drain_raw_mosh_control_socket(
     Ok(update)
 }
 
-
 fn run_raw_mosh_stream(
     cli: RawMoshCli,
     mut input: impl Read,
@@ -2240,7 +2215,7 @@ fn run_raw_mosh_stream(
     let output_frame_len = raw_rgb_frame_len(output_width, output_height)?;
     let scale_output = output_width != input_width || output_height != input_height;
     let control_socket = bind_raw_mosh_control_socket(control_port)?;
-    let mut codec = MoshCodec::new(config.clone())?;
+    let mut codec = MoshCodec::new(config)?;
     let mut controls = RawMoshControls::default();
     let mut bitstream_stats = MoshBitstreamMutationStats::default();
     let mut input_frame = vec![0_u8; frame_len];
@@ -2287,13 +2262,13 @@ fn run_raw_mosh_stream(
             quiet,
         )?;
         if control_update.rebuild_codec {
-            codec = MoshCodec::new(config.clone())?;
+            codec = MoshCodec::new(config)?;
         } else if control_update.reset_glitch_state {
             codec.reset_glitch_state();
         }
 
-        let mut frame_params = params.clone();
-        let mut frame_bitstream = bitstream.clone();
+        let mut frame_params = params;
+        let mut frame_bitstream = bitstream;
         apply_raw_mosh_controls(&mut frame_params, &mut frame_bitstream, controls);
 
         if frame_bitstream.enabled || frame_bitstream.has_mutations() {
@@ -2342,7 +2317,6 @@ fn run_raw_mosh_stream(
     }
 }
 
-
 fn write_raw_mosh_report(
     codec: &MoshCodec,
     bitstream_stats: &MoshBitstreamMutationStats,
@@ -2372,7 +2346,6 @@ fn write_raw_mosh_report(
         bitstream_stats.codebook_tiles
     )
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -40,7 +40,7 @@ if (-not (Test-Path -LiteralPath $lib)) {
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 $vsDevCmd = Find-VsDevCmd
 
-$nvccArgs = "-O2 -std=c++17 -I`"$includeDir`" -I`"$srcDir`" `"$harness`" `"$kernels`" `"$lib`" -o `"$exe`""
+$nvccArgs = "-O2 -std=c++17 -Xcompiler=/utf-8 -I`"$includeDir`" -I`"$srcDir`" `"$harness`" `"$kernels`" `"$lib`" -o `"$exe`""
 $command = "`"$vsDevCmd`" -arch=x64 -host_arch=x64 >nul && nvcc.exe $nvccArgs"
 & cmd.exe /d /s /c $command
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

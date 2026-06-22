@@ -829,6 +829,7 @@ impl MoshCodec {
         best
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn block_error(
         &self,
         input: &[u8],
@@ -1140,8 +1141,8 @@ impl MoshCodec {
         };
         let mut values = [0.0; CHANNELS];
 
-        for channel in 0..CHANNELS {
-            values[channel] = if use_dirty {
+        for (channel, value) in values.iter_mut().enumerate().take(CHANNELS) {
+            *value = if use_dirty {
                 let channel_reference = self
                     .dirty_reference_for_channel_sample(block_index, dst_x, dst_y, channel, params)
                     .unwrap_or_else(|| dirty_reference.expect("set when use_dirty is true"));
@@ -1506,6 +1507,7 @@ impl MoshCodec {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn predicted_sample(
         &self,
         reference: &[u8],
@@ -1685,6 +1687,7 @@ fn predictor_from_decoded_vectors(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn interpolated_motion_vector(
     vectors: &[(i16, i16)],
     block_index: usize,
@@ -2411,6 +2414,7 @@ impl BitstreamHeader {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sanitize_block(
     width: usize,
     height: usize,

@@ -1,12 +1,14 @@
 # TouchDesigner Operators
 
-The project ships three stable TOP operators. DLL names and TouchDesigner `opType` values remain unchanged.
+The project ships five TOP operators. DLL names and TouchDesigner `opType` values remain stable.
 
 | Operator label | DLL | Backend | Processing |
 | --- | --- | --- | --- |
 | Datamosh Motion TOP | `DatamoshTOP.dll` | `raw_mosh_v1` | CPU |
 | Datamosh Motion CUDA TOP | `DatamoshCudaTOP.dll` | `cuda_motion_v1` | CUDA |
 | Datamosh Scanline TOP | `ScanlineSignalTOP.dll` | `scanline_signal_v1` | CPU |
+| Datamosh DCT TOP | `DatamoshDctTOP.dll` | `dct_transform_v1` | CPU |
+| Datamosh DCT CUDA TOP | `DatamoshDctCudaTOP.dll` | `cuda_dct_v1` | CUDA |
 
 ## Common Conventions
 
@@ -39,6 +41,19 @@ Datamosh Scanline TOP:
 - Override pages: `Timebase`, `Carrier`, `Prediction`, `Packet`, `Advanced`
 - Audio page: CHOP mapping for macros and reset trigger
 
+Datamosh DCT TOP:
+
+- Macros: `Intensity`, `Structure`, `Persist`, `DC`, `Quant`
+- Override pages: `Coefficient`, `DC`, `Block`, `Temporal`, `Entropy`, `Advanced`
+- Entropy patterns use the CPU-only DTE0 variable-length bitstream path
+- Audio page: CHOP mapping for macros and reset trigger
+
+Datamosh DCT CUDA TOP:
+
+- Macros: `Intensity`, `Structure`, `Persist`, `DC`, `Quant`
+- Codec page: JPEG-style `Quality`
+- Coefficient-domain patterns match the CPU DCT operator; DTE0 entropy patterns are CPU-only
+
 ## Index Migration
 
 The 2026-06 operator cleanup moved `Clean` to index `0`.
@@ -46,5 +61,6 @@ The 2026-06 operator cleanup moved `Clean` to index `0`.
 - Datamosh Motion TOP: every former index moved by `+1`.
 - Datamosh Motion CUDA TOP: former `Clean` index `8` moved to `0`; former indices `0` through `7` moved by `+1`; GPU-only indices `9` through `12` are unchanged.
 - Datamosh Scanline TOP: indices are unchanged; only several display labels were clarified.
+- Datamosh DCT TOP and Datamosh DCT CUDA TOP started at schema version `1`; their menus are operator-specific.
 
 TouchDesigner may cache custom parameter schemas. After replacing a plugin DLL, recreate existing nodes once before validating saved index automation. Name-based selection is preferred when patch portability matters.

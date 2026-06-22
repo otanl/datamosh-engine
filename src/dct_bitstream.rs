@@ -23,11 +23,13 @@
 use crate::dct_codec::{BLOCK_AREA, ZIGZAG};
 
 const MAGIC: &[u8; 4] = b"DTE0";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 // magic(4) + version(1) + width(4) + height(4) + luma_blocks(4) + chroma_blocks(4) + payload_offset(4)
 const FIXED_HEADER_LEN: usize = 25;
 const DC_ALPHABET: usize = 17; // size categories 0..=16
-const AC_ALPHABET: usize = 256; // (run<<4)|size byte
+// Version 2 keeps the JPEG-compatible symbols for sizes 1..=15 and reserves
+// 256..=271 for (run, size=16), allowing the full i16 coefficient domain.
+const AC_ALPHABET: usize = 272;
 
 // ---- bit I/O (MSB first) ----
 
@@ -39,7 +41,11 @@ struct BitWriter {
 
 impl BitWriter {
     fn new() -> Self {
-        Self { bytes: Vec::new(), cur: 0, nbits: 0 }
+        Self {
+            bytes: Vec::new(),
+            cur: 0,
+            nbits: 0,
+        }
     }
 
     fn write_bits(&mut self, value: u32, n: u8) {
@@ -96,7 +102,11 @@ impl<'a> BitReader<'a> {
 #[inline]
 fn magnitude_bits(v: i32) -> u8 {
     let a = v.unsigned_abs();
-    if a == 0 { 0 } else { 32 - a.leading_zeros() as u8 }
+    if a == 0 {
+        0
+    } else {
+        32 - a.leading_zeros() as u8
+    }
 }
 
 #[inline]
@@ -104,7 +114,11 @@ fn write_magnitude(w: &mut BitWriter, v: i32, size: u8) {
     if size == 0 {
         return;
     }
-    let t = if v >= 0 { v as u32 } else { (v + (1 << size) - 1) as u32 };
+    let t = if v >= 0 {
+        v as u32
+    } else {
+        (v + (1 << size) - 1) as u32
+    };
     w.write_bits(t & ((1 << size) - 1), size);
 }
 
@@ -136,8 +150,8 @@ struct HuffTable {
 // Canonical code values for symbols already ordered by (length, symbol) — Annex K.5.
 fn canonical_codes(bits: &[u32; 17]) -> (Vec<u8>, Vec<u32>) {
     let mut huffsize = Vec::new();
-    for len in 1..=16usize {
-        for _ in 0..bits[len] {
+    for (len, &count) in bits.iter().enumerate().skip(1) {
+        for _ in 0..count {
             huffsize.push(len as u8);
         }
     }
@@ -283,14 +297,30 @@ fn build_huff(freq: &[u32], alphabet: usize) -> HuffTable {
         esize[sym as usize] = huffsize[idx];
     }
     let (mincode, maxcode, valptr) = build_decode(&bits, &huffcode);
-    HuffTable { bits, huffval, ecode, esize, mincode, maxcode, valptr }
+    HuffTable {
+        bits,
+        huffval,
+        ecode,
+        esize,
+        mincode,
+        maxcode,
+        valptr,
+    }
 }
 
 // Rebuild a decode-only table from a serialized (bits, huffval).
 fn parse_huff(bits: [u32; 17], huffval: Vec<u16>) -> HuffTable {
     let (_, huffcode) = canonical_codes(&bits);
     let (mincode, maxcode, valptr) = build_decode(&bits, &huffcode);
-    HuffTable { bits, huffval, ecode: Vec::new(), esize: Vec::new(), mincode, maxcode, valptr }
+    HuffTable {
+        bits,
+        huffval,
+        ecode: Vec::new(),
+        esize: Vec::new(),
+        mincode,
+        maxcode,
+        valptr,
+    }
 }
 
 fn serialize_table(table: &HuffTable, out: &mut Vec<u8>) {
@@ -298,27 +328,38 @@ fn serialize_table(table: &HuffTable, out: &mut Vec<u8>) {
         out.extend_from_slice(&(table.bits[len] as u16).to_le_bytes());
     }
     for &sym in &table.huffval {
-        out.push(sym as u8);
+        out.extend_from_slice(&sym.to_le_bytes());
     }
 }
 
-fn parse_table(bytes: &[u8], cursor: &mut usize) -> Option<HuffTable> {
+fn parse_table(bytes: &[u8], cursor: &mut usize, symbol_bytes: usize) -> Option<HuffTable> {
     let mut bits = [0u32; 17];
     let mut total = 0usize;
-    for len in 1..=16usize {
+    for slot in bits.iter_mut().skip(1) {
         if *cursor + 2 > bytes.len() {
             return None;
         }
         let v = u16::from_le_bytes([bytes[*cursor], bytes[*cursor + 1]]) as u32;
-        bits[len] = v;
+        *slot = v;
         total += v as usize;
         *cursor += 2;
     }
-    if *cursor + total > bytes.len() {
+    let table_bytes = total.checked_mul(symbol_bytes)?;
+    if *cursor + table_bytes > bytes.len() {
         return None;
     }
-    let huffval: Vec<u16> = bytes[*cursor..*cursor + total].iter().map(|&b| b as u16).collect();
-    *cursor += total;
+    let huffval = if symbol_bytes == 1 {
+        bytes[*cursor..*cursor + total]
+            .iter()
+            .map(|&b| b as u16)
+            .collect()
+    } else {
+        bytes[*cursor..*cursor + table_bytes]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect()
+    };
+    *cursor += table_bytes;
     Some(parse_huff(bits, huffval))
 }
 
@@ -365,7 +406,12 @@ fn walk_plane_symbols(region: &[i16], mut emit: impl FnMut(SymKind, u32, i32, u8
                 run -= 16;
             }
             let s = magnitude_bits(v);
-            emit(SymKind::Ac, (run << 4) | s as u32, v, s);
+            let symbol = if s == 16 {
+                256 + run
+            } else {
+                (run << 4) | s as u32
+            };
+            emit(SymKind::Ac, symbol, v, s);
             run = 0;
         }
         if run > 0 {
@@ -404,8 +450,11 @@ fn decode_plane(r: &mut BitReader, region: &mut [i16], dc: &HuffTable, ac: &Huff
                 pos += 16; // ZRL
                 continue;
             }
-            let run = (sym >> 4) as usize;
-            let s = (sym & 0x0F) as u8;
+            let (run, s) = if sym >= 256 {
+                ((sym - 256) as usize, 16)
+            } else {
+                ((sym >> 4) as usize, (sym & 0x0F) as u8)
+            };
             pos += run;
             if pos >= BLOCK_AREA {
                 break;
@@ -493,6 +542,11 @@ pub fn decode_dct_bitstream(
     if bytes.len() < FIXED_HEADER_LEN || &bytes[0..4] != MAGIC {
         return;
     }
+    let version = bytes[4];
+    if version != 1 && version != VERSION {
+        return;
+    }
+    let symbol_bytes = if version >= 2 { 2 } else { 1 };
     let mut cursor = 21usize; // after magic+version+w+h+luma+chroma
     let payload_offset = u32::from_le_bytes([
         bytes[cursor],
@@ -501,11 +555,11 @@ pub fn decode_dct_bitstream(
         bytes[cursor + 3],
     ]) as usize;
     cursor += 4;
-    let dc_table = match parse_table(bytes, &mut cursor) {
+    let dc_table = match parse_table(bytes, &mut cursor, symbol_bytes) {
         Some(t) => t,
         None => return,
     };
-    let ac_table = match parse_table(bytes, &mut cursor) {
+    let ac_table = match parse_table(bytes, &mut cursor, symbol_bytes) {
         Some(t) => t,
         None => return,
     };
@@ -560,10 +614,11 @@ impl Default for DctBitstreamParams {
 
 impl DctBitstreamParams {
     pub fn has_mutations(&self) -> bool {
-        self.byte_flip_every != 0
-            || self.drop_every != 0
-            || (self.slip_every != 0 && self.slip_bytes != 0 && self.slip_window > 1)
-            || self.truncate_tail > 0.0
+        self.enabled
+            && (self.byte_flip_every != 0
+                || self.drop_every != 0
+                || (self.slip_every != 0 && self.slip_bytes != 0 && self.slip_window > 1)
+                || self.truncate_tail > 0.0)
     }
 }
 
@@ -641,19 +696,19 @@ pub fn mutate_dct_bitstream(
     }
 
     if params.byte_flip_every != 0 {
-        for i in 0..payload_len {
+        for (i, byte) in payload.iter_mut().enumerate() {
             if (i as u64 + 1) % params.byte_flip_every == 0 {
                 let bit = (hash_u64(seed ^ i as u64) % 8) as u8;
-                payload[i] ^= 1 << bit;
+                *byte ^= 1 << bit;
                 stats.bytes_flipped += 1;
             }
         }
     }
 
     if params.drop_every != 0 {
-        for i in 0..payload_len {
+        for (i, byte) in payload.iter_mut().enumerate() {
             if (i as u64 + 1) % params.drop_every == 0 {
-                payload[i] = 0;
+                *byte = 0;
                 stats.bytes_dropped += 1;
             }
         }
@@ -710,7 +765,48 @@ pub fn set_dct_bitstream_parameter(
         "truncate_tail" => params.truncate_tail = finite.clamp(0.0, 1.0),
         _ => return Err(format!("unknown dct-bitstream parameter `{id}`")),
     }
+    if id != "bitstream_enabled" {
+        params.enabled = params.enabled
+            || params.byte_flip_every != 0
+            || params.drop_every != 0
+            || (params.slip_every != 0 && params.slip_bytes != 0 && params.slip_window > 1)
+            || params.truncate_tail > 0.0;
+    }
     Ok(())
+}
+
+pub fn apply_dct_bitstream_controls(
+    params: &mut DctBitstreamParams,
+    controls: crate::RawMoshControls,
+) {
+    let amount = finite_control(controls.intensity) * finite_control(controls.bitstream);
+    params.byte_flip_every = scale_event_interval(params.byte_flip_every, amount);
+    params.drop_every = scale_event_interval(params.drop_every, amount);
+    params.slip_every = scale_event_interval(params.slip_every, amount);
+    params.slip_bytes = scale_i32(params.slip_bytes, amount);
+    params.truncate_tail = (params.truncate_tail * amount).clamp(0.0, 1.0);
+    params.enabled = params.enabled && amount > 0.0;
+}
+
+fn finite_control(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, crate::RAW_MOSH_CONTROL_MAX)
+    } else {
+        0.0
+    }
+}
+
+fn scale_i32(value: i32, amount: f32) -> i32 {
+    (value as f32 * amount)
+        .round()
+        .clamp(i32::MIN as f32, i32::MAX as f32) as i32
+}
+
+fn scale_event_interval(interval: u64, amount: f32) -> u64 {
+    if interval == 0 || amount <= 0.0 {
+        return 0;
+    }
+    (interval as f32 / amount).round().max(1.0) as u64
 }
 
 #[cfg(test)]
@@ -743,8 +839,67 @@ mod tests {
             let bytes = encode_dct_bitstream(&coeff, 80, 48, lb, cb);
             let mut out = vec![0i16; coeff.len()];
             decode_dct_bitstream(&bytes, &mut out, lb, cb);
-            assert_eq!(coeff, out, "clean Huffman round-trip must be lossless ({lb},{cb})");
+            assert_eq!(
+                coeff, out,
+                "clean Huffman round-trip must be lossless ({lb},{cb})"
+            );
         }
+    }
+
+    #[test]
+    fn bitstream_round_trip_handles_full_i16_coefficients() {
+        let (lb, cb) = (2usize, 1usize);
+        let mut coeff = vec![0i16; (lb + 2 * cb) * BLOCK_AREA];
+        coeff[0] = i16::MIN;
+        coeff[1] = i16::MIN;
+        coeff[BLOCK_AREA] = i16::MAX;
+        coeff[2 * BLOCK_AREA + ZIGZAG[15]] = i16::MIN;
+
+        let bytes = encode_dct_bitstream(&coeff, 16, 8, lb, cb);
+        let mut output = vec![0i16; coeff.len()];
+        decode_dct_bitstream(&bytes, &mut output, lb, cb);
+
+        assert_eq!(coeff, output);
+    }
+
+    #[test]
+    fn bitstream_master_zero_disables_all_mutations() {
+        let mut params = DctBitstreamParams {
+            enabled: true,
+            byte_flip_every: 7,
+            drop_every: 11,
+            slip_every: 2,
+            slip_bytes: 5,
+            slip_window: 48,
+            truncate_tail: 0.35,
+        };
+
+        apply_dct_bitstream_controls(
+            &mut params,
+            crate::RawMoshControls {
+                intensity: 0.0,
+                ..crate::RawMoshControls::default()
+            },
+        );
+
+        assert!(!params.enabled);
+        assert!(!params.has_mutations());
+    }
+
+    #[test]
+    fn bitstream_enabled_is_an_actual_gate() {
+        let mut params = DctBitstreamParams {
+            byte_flip_every: 7,
+            ..Default::default()
+        };
+        assert!(!params.has_mutations());
+
+        set_dct_bitstream_parameter(&mut params, "byte_flip_every", 7.0).unwrap();
+        assert!(params.enabled);
+        assert!(params.has_mutations());
+
+        set_dct_bitstream_parameter(&mut params, "bitstream_enabled", 0.0).unwrap();
+        assert!(!params.has_mutations());
     }
 
     #[test]
@@ -753,7 +908,11 @@ mod tests {
         let coeff = sample_coeff(lb, cb);
         let raw = coeff.len() * 2;
         let bytes = encode_dct_bitstream(&coeff, 80, 48, lb, cb);
-        assert!(bytes.len() < raw, "entropy stream {} should be < raw {raw}", bytes.len());
+        assert!(
+            bytes.len() < raw,
+            "entropy stream {} should be < raw {raw}",
+            bytes.len()
+        );
     }
 
     #[test]
@@ -761,15 +920,28 @@ mod tests {
         let (lb, cb) = (40usize, 12usize);
         let coeff = sample_coeff(lb, cb);
         let presets = [
-            DctBitstreamParams { byte_flip_every: 7, ..Default::default() },
-            DctBitstreamParams { drop_every: 11, ..Default::default() },
             DctBitstreamParams {
+                enabled: true,
+                byte_flip_every: 7,
+                ..Default::default()
+            },
+            DctBitstreamParams {
+                enabled: true,
+                drop_every: 11,
+                ..Default::default()
+            },
+            DctBitstreamParams {
+                enabled: true,
                 slip_every: 1,
                 slip_bytes: 3,
                 slip_window: 16,
                 ..Default::default()
             },
-            DctBitstreamParams { truncate_tail: 0.5, ..Default::default() },
+            DctBitstreamParams {
+                enabled: true,
+                truncate_tail: 0.5,
+                ..Default::default()
+            },
         ];
         for p in presets {
             assert!(p.has_mutations());

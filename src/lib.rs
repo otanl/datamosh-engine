@@ -13,8 +13,9 @@ pub mod mosh_codec;
 
 pub mod scanline_codec;
 pub use dct_bitstream::{
-    DctBitstreamMutationStats, DctBitstreamParams, decode_dct_bitstream, encode_dct_bitstream,
-    load_dct_bitstream_preset, mutate_dct_bitstream, set_dct_bitstream_parameter,
+    DctBitstreamMutationStats, DctBitstreamParams, apply_dct_bitstream_controls,
+    decode_dct_bitstream, encode_dct_bitstream, load_dct_bitstream_preset, mutate_dct_bitstream,
+    set_dct_bitstream_parameter,
 };
 pub use dct_codec::{
     DctCodec, DctCodecConfig, DctCodecStats, DctGlitchParams, DctMutationStats,
@@ -30,9 +31,7 @@ pub use scanline_codec::{
     ScanlineMutationStats, mutate_scanline_bitstream,
 };
 
-
 pub const RAW_RGB_CHANNELS: usize = 3;
-
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RawMoshControls {
@@ -43,11 +42,9 @@ pub struct RawMoshControls {
     pub bitstream: f32,
 }
 
-
 pub const RAW_MOSH_CONTROL_MAX: f32 = 2.0;
 
 const RAW_MOSH_COMBINED_CONTROL_MAX: f32 = RAW_MOSH_CONTROL_MAX * RAW_MOSH_CONTROL_MAX;
-
 
 impl Default for RawMoshControls {
     fn default() -> Self {
@@ -61,7 +58,6 @@ impl Default for RawMoshControls {
     }
 }
 
-
 pub fn load_raw_mosh_preset(
     name: &str,
     config: &mut MoshCodecConfig,
@@ -70,7 +66,6 @@ pub fn load_raw_mosh_preset(
 ) -> Result<(), String> {
     apply_raw_mosh_preset(name, config, params, bitstream)
 }
-
 
 pub fn apply_raw_mosh_controls(
     params: &mut MoshGlitchParams,
@@ -159,7 +154,6 @@ pub fn apply_raw_mosh_controls(
     bitstream.enabled = bitstream.has_mutations();
 }
 
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RawMoshPresetGroup {
     Motion,
@@ -169,7 +163,6 @@ pub enum RawMoshPresetGroup {
     Hybrid,
     Other,
 }
-
 
 impl RawMoshPresetGroup {
     pub fn name(self) -> &'static str {
@@ -184,14 +177,12 @@ impl RawMoshPresetGroup {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RawMoshParameterKind {
     Float,
     Integer,
     Bool,
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct RawMoshPresetInfo {
@@ -200,7 +191,6 @@ pub struct RawMoshPresetInfo {
     pub title: &'static str,
     pub description: &'static str,
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct RawMoshParameterInfo {
@@ -214,7 +204,6 @@ pub struct RawMoshParameterInfo {
     pub default: f32,
 }
 
-
 impl RawMoshParameterInfo {
     pub fn is_realtime(self) -> bool {
         !self.requires_codec_rebuild()
@@ -225,16 +214,13 @@ impl RawMoshParameterInfo {
     }
 }
 
-
 pub fn raw_mosh_preset_infos() -> &'static [RawMoshPresetInfo] {
     RAW_MOSH_PRESET_INFOS
 }
 
-
 pub fn raw_mosh_parameter_infos() -> &'static [RawMoshParameterInfo] {
     RAW_MOSH_PARAMETER_INFOS
 }
-
 
 pub fn raw_mosh_parameter_infos_for_group(group: RawMoshPresetGroup) -> Vec<RawMoshParameterInfo> {
     RAW_MOSH_PARAMETER_INFOS
@@ -243,7 +229,6 @@ pub fn raw_mosh_parameter_infos_for_group(group: RawMoshPresetGroup) -> Vec<RawM
         .filter(|parameter| parameter.group == group)
         .collect()
 }
-
 
 pub fn raw_mosh_parameter_infos_for_preset(
     preset: &str,
@@ -262,7 +247,6 @@ pub fn raw_mosh_parameter_infos_for_preset(
         .collect())
 }
 
-
 pub fn raw_mosh_preset_group(preset: &str) -> Result<RawMoshPresetGroup, String> {
     RAW_MOSH_PRESET_INFOS
         .iter()
@@ -270,7 +254,6 @@ pub fn raw_mosh_preset_group(preset: &str) -> Result<RawMoshPresetGroup, String>
         .map(|info| info.group)
         .ok_or_else(|| format!("unknown raw-mosh preset `{preset}`"))
 }
-
 
 pub fn set_raw_mosh_parameter(
     config: &mut MoshCodecConfig,
@@ -344,7 +327,6 @@ pub fn set_raw_mosh_parameter(
     Ok(())
 }
 
-
 pub fn raw_mosh_parameter_requires_rebuild(id: &str) -> bool {
     RAW_MOSH_PARAMETER_INFOS
         .iter()
@@ -353,7 +335,6 @@ pub fn raw_mosh_parameter_requires_rebuild(id: &str) -> bool {
         .unwrap_or(false)
 }
 
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum MoshEngineBackend {
@@ -361,7 +342,6 @@ pub enum MoshEngineBackend {
     ScanlineSignalV1 = 2,
     DctTransformV1 = 3,
 }
-
 
 impl MoshEngineBackend {
     pub fn parse_id(id: u32) -> Option<Self> {
@@ -386,7 +366,6 @@ impl MoshEngineBackend {
     }
 }
 
-
 pub struct MoshEngine {
     backend: MoshEngineBackend,
     config: MoshCodecConfig,
@@ -403,13 +382,11 @@ pub struct MoshEngine {
     dct_params: DctGlitchParams,
     dct_bitstream: DctBitstreamParams,
     dct_stats: MoshCodecStats,
-    dct_fresh: bool,
     controls: RawMoshControls,
     rgb_input: Vec<u8>,
     rgb_output: Vec<u8>,
     last_bitstream_stats: MoshBitstreamMutationStats,
 }
-
 
 impl MoshEngine {
     pub fn new(width: usize, height: usize) -> io::Result<Self> {
@@ -462,7 +439,6 @@ impl MoshEngine {
             dct_params: DctGlitchParams::default(),
             dct_bitstream: DctBitstreamParams::default(),
             dct_stats: MoshCodecStats::default(),
-            dct_fresh: true,
             controls: RawMoshControls::default(),
             rgb_input: Vec::with_capacity(frame_len),
             rgb_output: Vec::with_capacity(frame_len),
@@ -546,7 +522,6 @@ impl MoshEngine {
                 load_dct_bitstream_preset(name, &mut self.dct_bitstream);
                 if let Some(codec) = &mut self.dct_codec {
                     codec.reset_glitch_state();
-                    self.dct_fresh = true;
                 }
                 Ok(())
             }
@@ -579,8 +554,18 @@ impl MoshEngine {
                 set_scanline_signal_parameter(&mut self.scanline_params, id, value)?;
             }
             MoshEngineBackend::DctTransformV1 => {
+                if id == "quality" {
+                    let quality = if value.is_finite() {
+                        value.round().clamp(1.0, 100.0) as u8
+                    } else {
+                        DctCodecConfig::default().quality
+                    };
+                    if quality != self.dct_config.quality {
+                        self.dct_config.quality = quality;
+                        self.rebuild_codec()?;
+                    }
                 // Coefficient parameters first; fall back to the entropy-bitstream params.
-                if set_dct_transform_parameter(&mut self.dct_params, id, value).is_err() {
+                } else if set_dct_transform_parameter(&mut self.dct_params, id, value).is_err() {
                     set_dct_bitstream_parameter(&mut self.dct_bitstream, id, value)?;
                 }
             }
@@ -598,7 +583,6 @@ impl MoshEngine {
         }
         if let Some(codec) = &mut self.dct_codec {
             codec.reset_glitch_state();
-            self.dct_fresh = true;
         }
         self.last_bitstream_stats = MoshBitstreamMutationStats::default();
     }
@@ -656,7 +640,8 @@ impl MoshEngine {
             MoshEngineBackend::DctTransformV1 => {
                 let mut frame_params = self.dct_params;
                 apply_dct_transform_controls(&mut frame_params, self.controls);
-                let frame_bitstream = self.dct_bitstream;
+                let mut frame_bitstream = self.dct_bitstream;
+                apply_dct_bitstream_controls(&mut frame_bitstream, self.controls);
                 let codec = self.dct_codec.as_mut().expect("dct backend owns dct codec");
                 if frame_bitstream.has_mutations() {
                     codec.process_rgb_frame_bitstream(
@@ -765,7 +750,8 @@ impl MoshEngine {
             MoshEngineBackend::DctTransformV1 => {
                 let mut frame_params = self.dct_params;
                 apply_dct_transform_controls(&mut frame_params, self.controls);
-                let frame_bitstream = self.dct_bitstream;
+                let mut frame_bitstream = self.dct_bitstream;
+                apply_dct_bitstream_controls(&mut frame_bitstream, self.controls);
                 if frame_bitstream.has_mutations() {
                     self.dct_codec
                         .as_mut()
@@ -811,7 +797,6 @@ impl MoshEngine {
             MoshEngineBackend::DctTransformV1 => {
                 self.dct_codec =
                     Some(DctCodec::new(self.dct_config).map_err(|error| error.to_string())?);
-                self.dct_fresh = true;
             }
         }
         self.last_bitstream_stats = MoshBitstreamMutationStats::default();
@@ -831,17 +816,13 @@ impl MoshEngine {
 
     fn update_dct_compat_stats(&mut self) {
         self.dct_stats.frames_in += 1;
-        self.dct_stats.blocks_encoded +=
-            (self.dct_config.width.div_ceil(8) * self.dct_config.height.div_ceil(8)) as u64;
-        if self.dct_fresh {
-            self.dct_stats.keyframes += 1;
-            self.dct_fresh = false;
-        } else {
-            self.dct_stats.predicted_frames += 1;
-        }
+        let luma_blocks = self.dct_config.width.div_ceil(8) * self.dct_config.height.div_ceil(8);
+        let chroma_blocks = self.dct_config.width.div_ceil(2).div_ceil(8)
+            * self.dct_config.height.div_ceil(2).div_ceil(8);
+        self.dct_stats.blocks_encoded += (luma_blocks + 2 * chroma_blocks) as u64;
+        self.dct_stats.keyframes += 1;
     }
 }
-
 
 fn normalized_raw_mosh_controls(controls: RawMoshControls) -> RawMoshControls {
     RawMoshControls {
@@ -853,7 +834,6 @@ fn normalized_raw_mosh_controls(controls: RawMoshControls) -> RawMoshControls {
     }
 }
 
-
 fn finite_control(value: f32) -> f32 {
     if value.is_finite() {
         value.clamp(0.0, RAW_MOSH_CONTROL_MAX)
@@ -861,7 +841,6 @@ fn finite_control(value: f32) -> f32 {
         0.0
     }
 }
-
 
 pub fn load_scanline_signal_preset(
     name: &str,
@@ -999,7 +978,6 @@ pub fn load_scanline_signal_preset(
     Ok(())
 }
 
-
 pub fn apply_scanline_signal_controls(
     params: &mut ScanlineGlitchParams,
     controls: RawMoshControls,
@@ -1055,7 +1033,6 @@ pub fn apply_scanline_signal_controls(
         scale_event_interval(params.packet_length_delta_every, bitstream);
     params.payload_swap_every = scale_event_interval(params.payload_swap_every, bitstream);
 }
-
 
 pub fn set_scanline_signal_parameter(
     params: &mut ScanlineGlitchParams,
@@ -1238,7 +1215,6 @@ pub fn set_scanline_signal_parameter(
     Ok(())
 }
 
-
 pub const DATAMOSH_STATUS_OK: i32 = 0;
 
 pub const DATAMOSH_STATUS_NULL_POINTER: i32 = -1;
@@ -1257,7 +1233,6 @@ pub const DATAMOSH_BACKEND_SCANLINE_SIGNAL_V1: u32 = 2;
 
 pub const DATAMOSH_BACKEND_DCT_TRANSFORM_V1: u32 = 3;
 
-
 fn ffi_status(function: impl FnOnce() -> Result<(), i32>) -> i32 {
     match panic::catch_unwind(AssertUnwindSafe(function)) {
         Ok(Ok(())) => DATAMOSH_STATUS_OK,
@@ -1266,7 +1241,6 @@ fn ffi_status(function: impl FnOnce() -> Result<(), i32>) -> i32 {
     }
 }
 
-
 fn ffi_engine_mut<'a>(engine: *mut MoshEngine) -> Result<&'a mut MoshEngine, i32> {
     if engine.is_null() {
         Err(DATAMOSH_STATUS_NULL_POINTER)
@@ -1274,7 +1248,6 @@ fn ffi_engine_mut<'a>(engine: *mut MoshEngine) -> Result<&'a mut MoshEngine, i32
         Ok(unsafe { &mut *engine })
     }
 }
-
 
 fn ffi_cstr<'a>(value: *const c_char) -> Result<&'a str, i32> {
     if value.is_null() {
@@ -1285,7 +1258,6 @@ fn ffi_cstr<'a>(value: *const c_char) -> Result<&'a str, i32> {
         .map_err(|_| DATAMOSH_STATUS_INVALID_UTF8)
 }
 
-
 fn ffi_input_slice<'a>(data: *const u8, len: usize) -> Result<&'a [u8], i32> {
     if data.is_null() {
         Err(DATAMOSH_STATUS_NULL_POINTER)
@@ -1293,7 +1265,6 @@ fn ffi_input_slice<'a>(data: *const u8, len: usize) -> Result<&'a [u8], i32> {
         Ok(unsafe { slice::from_raw_parts(data, len) })
     }
 }
-
 
 fn ffi_output_slice<'a>(data: *mut u8, len: usize) -> Result<&'a mut [u8], i32> {
     if data.is_null() {
@@ -1303,14 +1274,12 @@ fn ffi_output_slice<'a>(data: *mut u8, len: usize) -> Result<&'a mut [u8], i32> 
     }
 }
 
-
 fn ffi_process_status(result: io::Result<MoshBitstreamMutationStats>) -> Result<(), i32> {
     result.map(|_| ()).map_err(|error| match error.kind() {
         io::ErrorKind::InvalidInput => DATAMOSH_STATUS_INVALID_ARGUMENT,
         _ => DATAMOSH_STATUS_PROCESS_ERROR,
     })
 }
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_status_message(status: i32) -> *const c_char {
@@ -1326,18 +1295,15 @@ pub extern "C" fn datamosh_status_message(status: i32) -> *const c_char {
     message.as_ptr().cast()
 }
 
-
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_backend_count() -> usize {
     3
 }
 
-
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_default_backend() -> u32 {
     MoshEngineBackend::RawMoshV1.id()
 }
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_backend_name(backend: u32) -> *const c_char {
@@ -1350,12 +1316,10 @@ pub extern "C" fn datamosh_mosh_engine_backend_name(backend: u32) -> *const c_ch
     name.as_ptr().cast()
 }
 
-
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_new(width: usize, height: usize) -> *mut MoshEngine {
     datamosh_mosh_engine_new_with_backend(MoshEngineBackend::RawMoshV1.id(), width, height)
 }
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_new_with_backend(
@@ -1374,8 +1338,8 @@ pub extern "C" fn datamosh_mosh_engine_new_with_backend(
     }
 }
 
-
 #[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn datamosh_mosh_engine_backend(engine: *const MoshEngine) -> u32 {
     if engine.is_null() {
         return 0;
@@ -1383,14 +1347,13 @@ pub extern "C" fn datamosh_mosh_engine_backend(engine: *const MoshEngine) -> u32
     unsafe { &*engine }.backend().id()
 }
 
-
 #[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn datamosh_mosh_engine_free(engine: *mut MoshEngine) {
     if !engine.is_null() {
         drop(unsafe { Box::from_raw(engine) });
     }
 }
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_set_preset(
@@ -1405,7 +1368,6 @@ pub extern "C" fn datamosh_mosh_engine_set_preset(
             .map_err(|_| DATAMOSH_STATUS_INVALID_ARGUMENT)
     })
 }
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_set_controls(
@@ -1429,7 +1391,6 @@ pub extern "C" fn datamosh_mosh_engine_set_controls(
     })
 }
 
-
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_reset_controls(engine: *mut MoshEngine) -> i32 {
     ffi_status(|| {
@@ -1438,7 +1399,6 @@ pub extern "C" fn datamosh_mosh_engine_reset_controls(engine: *mut MoshEngine) -
         Ok(())
     })
 }
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_set_parameter(
@@ -1455,7 +1415,6 @@ pub extern "C" fn datamosh_mosh_engine_set_parameter(
     })
 }
 
-
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_reset_glitch(engine: *mut MoshEngine) -> i32 {
     ffi_status(|| {
@@ -1464,7 +1423,6 @@ pub extern "C" fn datamosh_mosh_engine_reset_glitch(engine: *mut MoshEngine) -> 
         Ok(())
     })
 }
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_process_rgb24(
@@ -1491,7 +1449,6 @@ pub extern "C" fn datamosh_mosh_engine_process_rgb24(
     })
 }
 
-
 #[unsafe(no_mangle)]
 pub extern "C" fn datamosh_mosh_engine_process_rgba8(
     engine: *mut MoshEngine,
@@ -1516,7 +1473,6 @@ pub extern "C" fn datamosh_mosh_engine_process_rgba8(
         ffi_process_status(engine.process_rgba8(input, output))
     })
 }
-
 
 const RAW_MOSH_PRESET_INFOS: &[RawMoshPresetInfo] = &[
     RawMoshPresetInfo {
@@ -1646,7 +1602,6 @@ const RAW_MOSH_PRESET_INFOS: &[RawMoshPresetInfo] = &[
         description: "High-strength all-frame codec-state damage.",
     },
 ];
-
 
 const RAW_MOSH_PARAMETER_INFOS: &[RawMoshParameterInfo] = &[
     RawMoshParameterInfo {
@@ -1910,7 +1865,6 @@ const RAW_MOSH_PARAMETER_INFOS: &[RawMoshParameterInfo] = &[
         default: 0.0,
     },
 ];
-
 
 pub fn apply_raw_mosh_preset(
     name: &str,
@@ -2632,7 +2586,6 @@ pub fn apply_raw_mosh_preset(
     Ok(())
 }
 
-
 fn control_amount(master: f32, channel: f32) -> f32 {
     if master.is_finite() && channel.is_finite() {
         (master * channel).clamp(0.0, RAW_MOSH_COMBINED_CONTROL_MAX)
@@ -2641,13 +2594,11 @@ fn control_amount(master: f32, channel: f32) -> f32 {
     }
 }
 
-
 fn scale_i16(value: i16, amount: f32) -> i16 {
     (value as f32 * amount)
         .round()
         .clamp(i16::MIN as f32, i16::MAX as f32) as i16
 }
-
 
 fn scale_i8(value: i8, amount: f32) -> i8 {
     (value as f32 * amount)
@@ -2655,13 +2606,11 @@ fn scale_i8(value: i8, amount: f32) -> i8 {
         .clamp(i8::MIN as f32, i8::MAX as f32) as i8
 }
 
-
 fn scale_u8(value: u8, amount: f32) -> u8 {
     (value as f32 * amount)
         .round()
         .clamp(u8::MIN as f32, u8::MAX as f32) as u8
 }
-
 
 fn scale_i32(value: i32, amount: f32) -> i32 {
     (value as f32 * amount)
@@ -2669,16 +2618,13 @@ fn scale_i32(value: i32, amount: f32) -> i32 {
         .clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }
 
-
 fn scale_u64(value: u64, amount: f32) -> u64 {
     (value as f32 * amount).round().max(0.0) as u64
 }
 
-
 fn scale_usize(value: usize, amount: f32) -> usize {
     (value as f32 * amount).round().max(0.0) as usize
 }
-
 
 fn scale_event_interval(interval: u64, amount: f32) -> u64 {
     if interval == 0 {
@@ -2689,7 +2635,6 @@ fn scale_event_interval(interval: u64, amount: f32) -> u64 {
     }
     (interval as f32 / amount).round().max(1.0) as u64
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -3008,6 +2953,79 @@ mod tests {
         assert_ne!(output, input);
         assert_eq!(engine.stats().frames_in, 1);
         assert_eq!(engine.stats().keyframes, 1);
+    }
+
+    #[test]
+    fn dct_backend_honors_master_bypass_and_intra_stats() {
+        let width = 32;
+        let height = 16;
+        let mut engine =
+            MoshEngine::with_backend(MoshEngineBackend::DctTransformV1, width, height).unwrap();
+        engine.set_preset("composite").unwrap();
+        engine.set_controls(RawMoshControls {
+            intensity: 0.0,
+            ..RawMoshControls::default()
+        });
+
+        let mut input = vec![0_u8; width * height * RAW_RGB_CHANNELS];
+        for (index, pixel) in input.chunks_exact_mut(RAW_RGB_CHANNELS).enumerate() {
+            pixel[0] = (index & 0xff) as u8;
+            pixel[1] = ((index * 3) & 0xff) as u8;
+            pixel[2] = ((index * 7) & 0xff) as u8;
+        }
+        let mut bypass = vec![0_u8; input.len()];
+        engine.process_rgb24(&input, &mut bypass).unwrap();
+
+        let mut clean =
+            MoshEngine::with_backend(MoshEngineBackend::DctTransformV1, width, height).unwrap();
+        let mut clean_output = vec![0_u8; input.len()];
+        clean.process_rgb24(&input, &mut clean_output).unwrap();
+
+        assert_eq!(bypass, clean_output);
+        assert_eq!(engine.stats().frames_in, 1);
+        assert_eq!(engine.stats().keyframes, 1);
+        assert_eq!(engine.stats().predicted_frames, 0);
+        assert_eq!(engine.stats().blocks_encoded, 12);
+
+        engine.process_rgb24(&input, &mut bypass).unwrap();
+        assert_eq!(engine.stats().keyframes, 2);
+        assert_eq!(engine.stats().predicted_frames, 0);
+    }
+
+    #[test]
+    fn dct_entropy_preset_is_disabled_by_master_zero() {
+        let width = 64;
+        let height = 32;
+        let mut engine =
+            MoshEngine::with_backend(MoshEngineBackend::DctTransformV1, width, height).unwrap();
+        engine.set_preset("desync").unwrap();
+        engine.set_controls(RawMoshControls {
+            intensity: 0.0,
+            ..RawMoshControls::default()
+        });
+
+        let input = vec![96_u8; width * height * RAW_RGB_CHANNELS];
+        let mut output = vec![0_u8; input.len()];
+        engine.process_rgb24(&input, &mut output).unwrap();
+
+        let mut clean =
+            MoshEngine::with_backend(MoshEngineBackend::DctTransformV1, width, height).unwrap();
+        let mut clean_output = vec![0_u8; input.len()];
+        clean.process_rgb24(&input, &mut clean_output).unwrap();
+        assert_eq!(output, clean_output);
+    }
+
+    #[test]
+    fn dct_quality_parameter_rebuilds_the_codec() {
+        let mut engine =
+            MoshEngine::with_backend(MoshEngineBackend::DctTransformV1, 32, 16).unwrap();
+        assert_eq!(engine.dct_config().unwrap().quality, 50);
+
+        engine.set_parameter("quality", 85.0).unwrap();
+        assert_eq!(engine.dct_config().unwrap().quality, 85);
+
+        engine.set_parameter("quality", 0.0).unwrap();
+        assert_eq!(engine.dct_config().unwrap().quality, 1);
     }
 
     #[test]

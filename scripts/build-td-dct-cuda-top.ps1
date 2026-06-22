@@ -58,6 +58,7 @@ $cudaLib = Join-Path $cudaPath 'lib\x64'
 $cppArgs = @(
     '/nologo',
     '/std:c++17',
+    '/utf-8',
     '/O2',
     '/EHsc',
     '/MD',
@@ -75,7 +76,7 @@ $cudaArgs = @(
     '-c',
     '-O3',
     '-std=c++17',
-    '-Xcompiler=/MD,/EHsc,/O2',
+    '-Xcompiler=/MD,/EHsc,/O2,/utf-8',
     "-I$tdSdk",
     "-I$sourceDir",
     '-gencode=arch=compute_75,code=sm_75',

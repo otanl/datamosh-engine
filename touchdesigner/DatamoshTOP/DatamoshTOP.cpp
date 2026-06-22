@@ -914,6 +914,7 @@ public:
         appendFloat(manager, "Prediction", "Historyperiod", "History Weave Period", 0.0, 0.0, 64.0,
                     0.0, 512.0);
 #elif defined(DCT_TRANSFORM_TOP)
+        appendFloat(manager, "Codec", "Quality", "Quality", 50.0, 1.0, 100.0, 1.0, 100.0);
         appendFloat(manager, "Coefficient", "Quantscale", "Quant Scale", 1.0, 1.0, 16.0, 1.0,
                     64.0);
         appendFloat(manager, "Coefficient", "Aczero", "AC Zero Above", 0.0, 0.0, 63.0, 0.0, 63.0);
@@ -1135,6 +1136,10 @@ private:
         myResidual = static_cast<float>(inputs->getParDouble("Residual"));
         myTemporal = static_cast<float>(inputs->getParDouble("Temporal"));
         myBitstream = static_cast<float>(inputs->getParDouble("Bitstream"));
+#if defined(DCT_TRANSFORM_TOP)
+        myDctQuality =
+            std::clamp(static_cast<float>(inputs->getParDouble("Quality")), 1.0f, 100.0f);
+#endif
         myUseParams = inputs->getParInt("Useparams") != 0;
 
         const char* parameter = inputs->getParString("Paramid");
@@ -1248,6 +1253,16 @@ private:
         myPattern = myRequestedPattern;
         myPatternIndex = myRequestedPatternIndex;
         updatePatternIndexText();
+
+#if defined(DCT_TRANSFORM_TOP)
+        if (myDctQuality != myAppliedDctQuality)
+        {
+            setStatus(myRuntime.setParameter(myEngine, "quality", myDctQuality));
+            if (myLastStatus != DATAMOSH_STATUS_OK)
+                return false;
+            myAppliedDctQuality = myDctQuality;
+        }
+#endif
 
         if (myUseParams)
         {
@@ -1369,6 +1384,9 @@ private:
         myHeight = 0;
         myPreset.clear();
         resetAppliedOverrideState();
+#if defined(DCT_TRANSFORM_TOP)
+        myAppliedDctQuality = 50.0f;
+#endif
         updateResolutionText();
     }
 
@@ -1437,6 +1455,10 @@ private:
     float myResidual = 1.0f;
     float myTemporal = 1.0f;
     float myBitstream = 1.0f;
+#if defined(DCT_TRANSFORM_TOP)
+    float myDctQuality = 50.0f;
+    float myAppliedDctQuality = 50.0f;
+#endif
     float myParameterValue = 0.0f;
     float myAudioResetValue = 0.0f;
     bool myUseParams = false;

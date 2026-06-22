@@ -74,6 +74,7 @@ green/magenta diagonal).
 - `Persist`: temporal feedback / persistence amount.
 - `DC`: DC drift and per-block DC offset.
 - `Quant`: quantization coarseness.
+- `Quality` (1..100): JPEG-style base quantization quality; changing it rebuilds the CPU codec.
 - `Use Overrides`: enables direct DCT0 parameter overrides.
 - `Coefficient` page: quant scale, AC zero-above, sign-flip, coeff shift, zig-zag reverse,
   block transpose.
@@ -85,5 +86,6 @@ green/magenta diagonal).
 - `Advanced` page: direct `Param ID` / `Param Value` override.
 - `Reset Glitch`: clears the temporal-feedback history.
 
-The five macro controls use `0..1` as the authored range and `1..2` as overdrive. The
+The five macro controls use `0..1` as the authored range and `1..2` as overdrive.
+`Intensity = 0` disables coefficient, persistence, and DTE0 entropy corruption. The
 `Pattern` menu can be driven by its displayed name or by a zero-based CHOP/Python index.
